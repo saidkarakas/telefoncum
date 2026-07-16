@@ -72,6 +72,28 @@ export const calculatePhoneCosts = (phone) => {
 
 // Initialize DB and seed demo data if empty
 export const initDb = (force = false) => {
+  // 8. Auth session (default admin user: admin@telefoncum.com / 123456)
+  const defaultAuth = {
+    username: 'admin@telefoncum.com',
+    passwordHash: '8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92', // SHA-256 of '123456'
+    isLoggedIn: false
+  };
+  
+  const existingUserStr = localStorage.getItem('tys_admin_user');
+  if (existingUserStr) {
+    try {
+      const existingUser = JSON.parse(existingUserStr);
+      // Eski MD5 veya sadece 'admin' olan verileri yeni asenkron SHA-256 standardına dönüştür
+      if (existingUser.username === 'admin' || (existingUser.passwordHash && existingUser.passwordHash.length === 32)) {
+        localStorage.setItem('tys_admin_user', JSON.stringify(defaultAuth));
+      }
+    } catch (e) {
+      localStorage.setItem('tys_admin_user', JSON.stringify(defaultAuth));
+    }
+  } else {
+    localStorage.setItem('tys_admin_user', JSON.stringify(defaultAuth));
+  }
+
   if (!force && localStorage.getItem(STORAGE_KEYS.PHONES)) {
     return; // Already initialized
   }
@@ -331,25 +353,5 @@ export const initDb = (force = false) => {
   ];
   saveJson(STORAGE_KEYS.REPAIRS, demoRepairs);
 
-  // 8. Auth session (default admin user: admin@telefoncum.com / 123456)
-  const defaultAuth = {
-    username: 'admin@telefoncum.com',
-    passwordHash: '8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92', // SHA-256 of '123456'
-    isLoggedIn: false
-  };
-  
-  const existingUserStr = localStorage.getItem('tys_admin_user');
-  if (existingUserStr) {
-    try {
-      const existingUser = JSON.parse(existingUserStr);
-      // Eski MD5 veya sadece 'admin' olan verileri yeni asenkron SHA-256 standardına dönüştür
-      if (existingUser.username === 'admin' || (existingUser.passwordHash && existingUser.passwordHash.length === 32)) {
-        localStorage.setItem('tys_admin_user', JSON.stringify(defaultAuth));
-      }
-    } catch (e) {
-      localStorage.setItem('tys_admin_user', JSON.stringify(defaultAuth));
-    }
-  } else {
-    localStorage.setItem('tys_admin_user', JSON.stringify(defaultAuth));
-  }
+  // Auth session has been migrated to the top of initDb to bypass inventory load checks.
 };
