@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { initDb, authService } from './db/storage';
+import { initDb } from './db/services/shared';
+import { authService } from './db/services/authService';
 import { supabase, isSupabaseConfigured } from './db/supabaseClient';
 
 // Component imports
@@ -26,7 +27,24 @@ export default function App() {
   // Initialize DB and Check Authentication
   useEffect(() => {
     initDb();
-    setIsLoggedIn(authService.checkSession());
+    
+    const checkAuth = async () => {
+      if (isSupabaseConfigured) {
+        const { data: { session } } = await supabase.auth.getSession();
+        setIsLoggedIn(!!session);
+      } else {
+        setIsLoggedIn(authService.checkSession());
+      }
+    };
+    checkAuth();
+
+    let authListener;
+    if (isSupabaseConfigured) {
+      const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+        setIsLoggedIn(!!session);
+      });
+      authListener = subscription;
+    }
 
     // Register PWA Service Worker for offline capability
     if ('serviceWorker' in navigator) {
@@ -40,6 +58,10 @@ export default function App() {
           });
       });
     }
+
+    return () => {
+      if (authListener) authListener.unsubscribe();
+    };
   }, []);
 
   // Supabase Cloud Synchronisation Polling Loop
@@ -90,8 +112,8 @@ export default function App() {
     setActivePage('dashboard');
   };
 
-  const handleLogout = () => {
-    authService.logout();
+  const handleLogout = async () => {
+    await authService.logout();
     setIsLoggedIn(false);
   };
 

@@ -11,7 +11,7 @@ import {
   ChevronRight,
   TrendingDown
 } from 'lucide-react';
-import { reportService } from '../db/storage';
+import { reportService } from '../db/services/reportService';
 
 export default function Dashboard({ setActivePage, setSelectedPhoneId, setOpenPhoneDetail }) {
   const [data, setData] = useState(null);

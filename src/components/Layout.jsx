@@ -14,7 +14,7 @@ import {
   Menu,
   X
 } from 'lucide-react';
-import { settingsService } from '../db/storage';
+import { settingsService } from '../db/services/settingsService';
 
 export default function Layout({ 
   children, 

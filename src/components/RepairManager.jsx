@@ -12,7 +12,8 @@ import {
   Layers,
   ArrowRightLeft
 } from 'lucide-react';
-import { repairService, phoneService } from '../db/storage';
+import { repairService } from '../db/services/repairService';
+import { phoneService } from '../db/services/phoneService';
 
 export default function RepairManager({ activePage, globalSearchQuery }) {
   const [repairs, setRepairs] = useState([]);

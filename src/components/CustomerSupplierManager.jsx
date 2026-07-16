@@ -14,12 +14,10 @@ import {
   TrendingUp,
   TrendingDown
 } from 'lucide-react';
-import { 
-  customerService, 
-  supplierService, 
-  getTransactionService, 
-  phoneService 
-} from '../db/storage';
+import { customerService } from '../db/services/customerService';
+import { supplierService } from '../db/services/supplierService';
+import { getTransactionService } from '../db/services/transactionService';
+import { phoneService } from '../db/services/phoneService';
 import { printCariEkstre } from '../utils/exporter';
 
 export default function CustomerSupplierManager({ activePage, globalSearchQuery }) {

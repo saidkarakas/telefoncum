@@ -9,7 +9,7 @@ import {
   PieChart,
   ChevronDown
 } from 'lucide-react';
-import { expenseService } from '../db/storage';
+import { expenseService } from '../db/services/expenseService';
 
 export default function ExpenseManager({ activePage, globalSearchQuery }) {
   const [expenses, setExpenses] = useState([]);

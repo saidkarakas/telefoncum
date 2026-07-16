@@ -10,7 +10,8 @@ import {
   Building,
   Coins
 } from 'lucide-react';
-import { settingsService, initDb } from '../db/storage';
+import { settingsService } from '../db/services/settingsService';
+import { initDb } from '../db/services/shared';
 
 export default function SettingsPage({ activePage }) {
   const [settings, setSettings] = useState({
@@ -59,7 +60,7 @@ export default function SettingsPage({ activePage }) {
       
       const link = document.createElement('a');
       link.href = url;
-      link.download = `telefon_stok_yedek_${new Date().toISOString().split('T')[0]}.json`;
+      link.download = `telefoncum-yedek-${new Date().toISOString().split('T')[0]}.json`;
       link.click();
       setSuccessMsg('Veritabanı yedeği indirildi.');
       setTimeout(() => setSuccessMsg(''), 3000);
@@ -75,6 +76,12 @@ export default function SettingsPage({ activePage }) {
     const file = e.target.files[0];
     if (!file) return;
 
+    const userConfirm = confirm("⚠️ UYARI: Yedek yükleme işlemi mevcut tüm verilerinizi (telefon stokları, tamir kayıtları, kasa hareketleri vb.) tamamen silecektir ve geri alınamaz. Devam etmek istediğinizden emin misiniz?");
+    if (!userConfirm) {
+      e.target.value = '';
+      return;
+    }
+
     const reader = new FileReader();
     reader.onload = (event) => {
       try {
@@ -83,9 +90,10 @@ export default function SettingsPage({ activePage }) {
         setSuccessMsg('Veriler başarıyla içe aktarıldı. Sayfa yenileniyor...');
         setTimeout(() => {
           window.location.reload();
-        }, 1500);
+        }, 1550);
       } catch (err) {
         setErrorMsg(err.message || 'Yedek dosyası yüklenirken bir hata oluştu.');
+        e.target.value = '';
       }
     };
     reader.readAsText(file);

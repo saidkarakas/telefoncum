@@ -9,7 +9,9 @@ import {
   Layers,
   ArrowUpRight
 } from 'lucide-react';
-import { reportService, phoneService, expenseService } from '../db/storage';
+import { reportService } from '../db/services/reportService';
+import { phoneService } from '../db/services/phoneService';
+import { expenseService } from '../db/services/expenseService';
 
 export default function Reports({ activePage }) {
   const [data, setData] = useState(null);

@@ -13,7 +13,8 @@ import {
   CheckCircle,
   FileText
 } from 'lucide-react';
-import { phoneService, calculatePhoneCosts } from '../db/storage';
+import { phoneService } from '../db/services/phoneService';
+import { calculatePhoneCosts } from '../db/services/shared';
 
 export default function PhoneDetail({ phoneId, onClose, onDataChanged }) {
   const [phone, setPhone] = useState(null);

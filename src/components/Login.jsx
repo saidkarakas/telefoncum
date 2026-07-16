@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { KeyRound, User, Eye, EyeOff, ShieldCheck, AlertCircle } from 'lucide-react';
-import { authService } from '../db/storage';
+import { authService } from '../db/services/authService';
 
 export default function Login({ onLoginSuccess }) {
   const [username, setUsername] = useState('');
@@ -10,27 +10,29 @@ export default function Login({ onLoginSuccess }) {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
     
     if (!username.trim() || !password.trim()) {
-      setError('Kullanıcı adı ve şifre alanları boş bırakılamaz.');
+      setError('E-posta / Kullanıcı adı ve şifre alanları boş bırakılamaz.');
       return;
     }
 
     setLoading(true);
 
-    // Simulate small latency for premium UI transition
-    setTimeout(() => {
-      const success = authService.login(username, password, rememberMe);
+    try {
+      const success = await authService.login(username, password, rememberMe);
       setLoading(false);
       if (success) {
         onLoginSuccess();
       } else {
-        setError('Hatalı kullanıcı adı veya şifre! (Demo: admin / 123456)');
+        setError('Hatalı kullanıcı adı/e-posta veya şifre! (Demo: admin / 123456)');
       }
-    }, 600);
+    } catch (err) {
+      setLoading(false);
+      setError(err.message || 'Giriş yapılırken bir hata oluştu.');
+    }
   };
 
   return (
@@ -60,7 +62,7 @@ export default function Login({ onLoginSuccess }) {
           {/* Username */}
           <div className="space-y-1">
             <label className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">
-              Kullanıcı Adı
+              E-posta veya Kullanıcı Adı
             </label>
             <div className="relative">
               <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-400">
