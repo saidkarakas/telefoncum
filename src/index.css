@@ -1,0 +1,64 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --color-slate-150: #ebf0f5;
+  --color-slate-250: #cbd5e1;
+  --color-slate-350: #b3c5d7;
+  --color-slate-450: #738ca6;
+  --color-slate-550: #506982;
+  --color-slate-650: #31465c;
+  --color-slate-750: #1b293a;
+  --color-slate-850: #0f1824;
+
+  --color-indigo-650: #4f46e5;
+  --color-indigo-750: #3b3fcd;
+
+  --color-red-550: #f43f5e;
+  --color-red-650: #e11d48;
+
+  --color-emerald-250: #6ee7b7;
+  --color-emerald-650: #059669;
+}
+
+@layer base {
+  body {
+    @apply bg-slate-50 text-slate-900 transition-colors duration-200 dark:bg-slate-950 dark:text-slate-50 antialiased;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  }
+}
+
+/* Custom Scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  @apply bg-slate-300 dark:bg-slate-700 rounded-full;
+}
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-slate-400 dark:bg-slate-600;
+}
+
+/* Print Styles for Receipts/Lists */
+@media print {
+  body {
+    background: white !important;
+    color: black !important;
+  }
+  .no-print {
+    display: none !important;
+  }
+  .print-only {
+    display: block !important;
+  }
+  .print-card {
+    border: 1px solid #ccc !important;
+    box-shadow: none !important;
+    background: transparent !important;
+  }
+}

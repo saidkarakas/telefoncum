@@ -1,0 +1,22 @@
+{
+  "short_name": "TelefonStok",
+  "name": "Telefon Alım Satım ve Stok Yönetim Sistemi",
+  "description": "Profesyonel Mobil ve Masaüstü Uyumlu Telefon Stok ve Cari Takip Sistemi",
+  "icons": [
+    {
+      "src": "logo192.png",
+      "type": "image/png",
+      "sizes": "192x192"
+    },
+    {
+      "src": "logo512.png",
+      "type": "image/png",
+      "sizes": "512x512"
+    }
+  ],
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "theme_color": "#0f172a",
+  "background_color": "#0f172a"
+}
