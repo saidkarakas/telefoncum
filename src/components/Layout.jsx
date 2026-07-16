@@ -12,7 +12,8 @@ import {
   Moon,
   Search,
   Menu,
-  X
+  X,
+  User
 } from 'lucide-react';
 import { settingsService } from '../db/services/settingsService';
 
@@ -30,9 +31,14 @@ export default function Layout({
 
   // Load Settings
   useEffect(() => {
-    const activeSettings = settingsService.get();
-    setSettings(activeSettings);
-    setTheme(activeSettings.theme || 'dark');
+    const loadSettings = () => {
+      const activeSettings = settingsService.get();
+      setSettings(activeSettings);
+      setTheme(activeSettings.theme || 'dark');
+    };
+    loadSettings();
+    window.addEventListener('tys_db_update', loadSettings);
+    return () => window.removeEventListener('tys_db_update', loadSettings);
   }, [activePage]);
 
   // Handle dark mode DOM changes
@@ -230,7 +236,7 @@ export default function Layout({
 
             {/* Business Logo Indicator or User Initials */}
             <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-indigo-500 to-teal-500 flex items-center justify-center text-white text-xs font-bold shadow-md shadow-indigo-500/10">
-              AD
+              <User size={16} />
             </div>
           </div>
         </header>

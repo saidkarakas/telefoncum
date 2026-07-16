@@ -25,7 +25,10 @@ export default function SettingsPage({ activePage }) {
   const [errorMsg, setErrorMsg] = useState('');
   
   useEffect(() => {
-    setSettings(settingsService.get());
+    const loadSettings = () => setSettings(settingsService.get());
+    loadSettings();
+    window.addEventListener('tys_db_update', loadSettings);
+    return () => window.removeEventListener('tys_db_update', loadSettings);
   }, [activePage]);
 
   // Save Settings
