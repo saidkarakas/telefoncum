@@ -12,17 +12,24 @@ import {
 import { reportService } from '../db/services/reportService';
 import { phoneService } from '../db/services/phoneService';
 import { expenseService } from '../db/services/expenseService';
+import { STORAGE_KEYS, getJson } from '../db/services/shared';
 
 export default function Reports({ activePage }) {
   const [data, setData] = useState(null);
+  const [logs, setLogs] = useState([]);
 
   useEffect(() => {
     const refreshData = () => {
       setData(reportService.getReportSummary());
+      setLogs(getJson(STORAGE_KEYS.AUDIT_LOG, []).slice(0, 15)); // Son 15 islem
     };
     refreshData();
     window.addEventListener('tys_db_update', refreshData);
-    return () => window.removeEventListener('tys_db_update', refreshData);
+    window.addEventListener('tys_audit_log_update', refreshData);
+    return () => {
+      window.removeEventListener('tys_db_update', refreshData);
+      window.removeEventListener('tys_audit_log_update', refreshData);
+    };
   }, [activePage]);
 
   if (!data) return (
@@ -73,6 +80,12 @@ export default function Reports({ activePage }) {
     .sort((a, b) => b[1] - a[1]);
 
   const totalAllExpenses = sortedExpenses.reduce((sum, e) => sum + e[1], 0);
+
+  // Donut chart variables
+  const donutRadius = 38;
+  const donutCirc = 2 * Math.PI * donutRadius;
+  let donutAccumulatedPercent = 0;
+  const donutColors = ['#6366f1', '#10b981', '#f59e0b', '#ec4899', '#8b5cf6', '#64748b'];
 
   return (
     <div className="space-y-6">
@@ -363,6 +376,51 @@ export default function Reports({ activePage }) {
           )}
         </div>
 
+      </div>
+
+      {/* ROW 4: AUDIT LOG (AKTIVITE GECMISTI) */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm space-y-4">
+        <h4 className="font-bold uppercase tracking-wider text-[10px] text-slate-450 flex items-center gap-1.5 border-b border-slate-100 dark:border-slate-800 pb-2">
+          <Layers size={14} className="text-indigo-500" />
+          Aktivite Geçmişi (Son 15 İşlem)
+        </h4>
+
+        {logs.length === 0 ? (
+          <div className="text-center text-[11px] text-slate-400 py-4">Kayıtlı aktivite bulunamadı.</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="border-b border-slate-100 dark:border-slate-800 text-[10px] uppercase text-slate-500 bg-slate-50 dark:bg-slate-800/50">
+                  <th className="py-2 px-3 font-semibold rounded-tl-lg">Tarih</th>
+                  <th className="py-2 px-3 font-semibold">Kullanıcı</th>
+                  <th className="py-2 px-3 font-semibold">İşlem</th>
+                  <th className="py-2 px-3 font-semibold">Modül</th>
+                </tr>
+              </thead>
+              <tbody className="text-[11px] text-slate-700 dark:text-slate-300">
+                {logs.map(log => (
+                  <tr key={log.id} className="border-b border-slate-50 dark:border-slate-800/50 hover:bg-slate-50 dark:hover:bg-slate-800/30">
+                    <td className="py-2.5 px-3">
+                      {new Date(log.created_at).toLocaleString('tr-TR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                    </td>
+                    <td className="py-2.5 px-3 font-medium">{log.username}</td>
+                    <td className="py-2.5 px-3">
+                      <span className={`inline-flex px-1.5 py-0.5 rounded text-[9px] font-bold ${
+                        log.action === 'CREATE' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400' :
+                        log.action === 'UPDATE' ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400' :
+                        'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+                      }`}>
+                        {log.action}
+                      </span>
+                    </td>
+                    <td className="py-2.5 px-3 font-medium">{log.entity_type}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
     </div>

@@ -12,7 +12,8 @@ import {
   AlertCircle,
   HelpCircle,
   TrendingUp,
-  TrendingDown
+  TrendingDown,
+  Clock
 } from 'lucide-react';
 import { customerService } from '../db/services/customerService';
 import { supplierService } from '../db/services/supplierService';
@@ -40,21 +41,38 @@ export default function CustomerSupplierManager({ activePage, globalSearchQuery 
 
   // Form States (Contact)
   const [contactForm, setContactForm] = useState({
-    fullName: '', phone: '', address: '', note: ''
+    fullName: '', phone: '', address: '', note: '', isBlacklisted: false
   });
 
   // Form States (Transaction)
   const [transForm, setTransForm] = useState({
-    amount: '', date: new Date().toISOString().split('T')[0], description: ''
+    amount: '', date: new Date().toISOString().split('T')[0], description: '', dueDate: ''
   });
 
   const [formError, setFormError] = useState('');
   const [ledgerTransactions, setLedgerTransactions] = useState([]);
+  
+  // CRM Notes State
+  const [newCrmNote, setNewCrmNote] = useState('');
 
   // Load Data
   const loadData = () => {
-    setCustomers(customerService.getAll());
-    setSuppliers(supplierService.getAll());
+    const allCustomers = customerService.getAll();
+    const allSuppliers = supplierService.getAll();
+    
+    const ts = getTransactionService();
+    const now = new Date().getTime();
+    
+    const checkOverdue = (contacts) => {
+      return contacts.map(contact => {
+        const cTrans = ts.getByContactId(contact.id);
+        const hasOverdue = contact.balance > 0 && cTrans.some(t => t.dueDate && new Date(t.dueDate).getTime() < now);
+        return { ...contact, hasOverdue };
+      });
+    };
+
+    setCustomers(checkOverdue(allCustomers));
+    setSuppliers(checkOverdue(allSuppliers));
   };
 
   useEffect(() => {
@@ -92,7 +110,7 @@ export default function CustomerSupplierManager({ activePage, globalSearchQuery 
   // Add / Edit triggers
   const handleAddClick = () => {
     setEditingContact(null);
-    setContactForm({ fullName: '', phone: '', address: '', note: '' });
+    setContactForm({ fullName: '', phone: '', address: '', note: '', isBlacklisted: false });
     setFormError('');
     setShowAddEditModal(true);
   };
@@ -103,7 +121,8 @@ export default function CustomerSupplierManager({ activePage, globalSearchQuery 
       fullName: contact.fullName || '',
       phone: contact.phone || '',
       address: contact.address || '',
-      note: contact.note || ''
+      note: contact.note || '',
+      isBlacklisted: !!contact.isBlacklisted
     });
     setFormError('');
     setShowAddEditModal(true);
@@ -151,11 +170,7 @@ export default function CustomerSupplierManager({ activePage, globalSearchQuery 
   // Trans trigger (Add payment/collection)
   const handleTransClick = (type) => {
     setTransType(type);
-    setTransForm({
-      amount: '',
-      date: new Date().toISOString().split('T')[0],
-      description: type === 'tahsilat' ? 'Tahsilat Alındı' : 'Ödeme Yapıldı'
-    });
+    setTransForm({ amount: '', date: new Date().toISOString().split('T')[0], description: '', dueDate: '' });
     setFormError('');
     setShowTransModal(true);
   };
@@ -178,6 +193,7 @@ export default function CustomerSupplierManager({ activePage, globalSearchQuery 
         type: transType, // tahsilat | odeme
         amount: Number(transForm.amount),
         date: transForm.date,
+        dueDate: transForm.dueDate || null,
         description: transForm.description
       });
 
@@ -206,6 +222,34 @@ export default function CustomerSupplierManager({ activePage, globalSearchQuery 
       const refreshed = service.getById(selectedContact.id);
       setSelectedContact(refreshed);
       loadLedger(refreshed);
+      loadData();
+    }
+  };
+
+  // Add CRM Note
+  const handleAddCrmNote = () => {
+    if (!newCrmNote.trim()) return;
+    const service = activeTab === 'customers' ? customerService : supplierService;
+    const updatedNotes = [...(selectedContact.crmNotes || []), {
+      id: Date.now().toString(),
+      date: new Date().toISOString(),
+      text: newCrmNote.trim()
+    }];
+    const updatedContact = { ...selectedContact, crmNotes: updatedNotes };
+    service.save(updatedContact);
+    setSelectedContact(updatedContact);
+    setNewCrmNote('');
+    loadData();
+  };
+
+  // Delete CRM Note
+  const handleDeleteCrmNote = (noteId) => {
+    if (confirm('Bu notu silmek istediğinize emin misiniz?')) {
+      const service = activeTab === 'customers' ? customerService : supplierService;
+      const updatedNotes = (selectedContact.crmNotes || []).filter(n => n.id !== noteId);
+      const updatedContact = { ...selectedContact, crmNotes: updatedNotes };
+      service.save(updatedContact);
+      setSelectedContact(updatedContact);
       loadData();
     }
   };
@@ -292,8 +336,13 @@ export default function CustomerSupplierManager({ activePage, globalSearchQuery 
                   <tr key={contact.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-850/30 transition-colors">
                     
                     {/* Name */}
-                    <td className="p-4 font-bold text-slate-850 dark:text-white">
-                      {contact.fullName}
+                    <td className="p-4 font-bold text-slate-850 dark:text-white flex items-center gap-1.5">
+                      {contact.isBlacklisted && <AlertCircle size={14} className="text-red-500" title="Kara Liste" />}
+                      {contact.hasOverdue && !contact.isBlacklisted && <Clock size={14} className="text-red-500 animate-pulse" title="Gecikmiş Vade/Taksit Bulunuyor!" />}
+                      <span className={contact.isBlacklisted ? 'text-red-500' : ''}>{contact.fullName}</span>
+                      {contact.hasOverdue && (
+                        <span className="text-[9px] bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400 px-1 rounded uppercase">Gecikmiş Vade</span>
+                      )}
                     </td>
 
                     {/* Phone */}
@@ -440,6 +489,22 @@ export default function CustomerSupplierManager({ activePage, globalSearchQuery 
                 />
               </div>
 
+              {/* Blacklist Toggle */}
+              {activeTab === 'customers' && (
+                <label className="flex items-center gap-2 p-2.5 rounded-xl border border-red-200 bg-red-50 dark:bg-red-950/20 dark:border-red-900/30 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={contactForm.isBlacklisted}
+                    onChange={(e) => setContactForm(prev => ({ ...prev, isBlacklisted: e.target.checked }))}
+                    className="rounded border-red-300 text-red-600 focus:ring-red-500 w-4 h-4 cursor-pointer"
+                  />
+                  <div className="flex flex-col">
+                    <span className="font-bold text-red-700 dark:text-red-400 uppercase tracking-wide text-[10px]">Kara Listeye Al</span>
+                    <span className="text-[10px] text-red-500 dark:text-red-500/70">Riskli/sorunlu müşteri olarak işaretle</span>
+                  </div>
+                </label>
+              )}
+
               {/* Buttons */}
               <div className="flex justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
                 <button
@@ -451,7 +516,7 @@ export default function CustomerSupplierManager({ activePage, globalSearchQuery 
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-755 text-white font-semibold rounded-xl cursor-pointer shadow-md shadow-indigo-600/10"
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-750 text-white font-semibold rounded-xl cursor-pointer shadow-md shadow-indigo-600/10"
                 >
                   Kaydet
                 </button>
@@ -587,7 +652,18 @@ export default function CustomerSupplierManager({ activePage, globalSearchQuery 
                       ) : (
                         ledgerTransactions.map(t => (
                           <tr key={t.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-850/25">
-                            <td className="p-3 text-slate-500">{new Date(t.date).toLocaleDateString('tr-TR')}</td>
+                            <td className="p-3 text-slate-500">
+                              <div>{new Date(t.date).toLocaleDateString('tr-TR')}</div>
+                              {t.dueDate && (
+                                <div className={`text-[10px] mt-0.5 font-bold ${
+                                  new Date(t.dueDate).getTime() < new Date().getTime() 
+                                    ? 'text-red-500' 
+                                    : 'text-amber-550 dark:text-amber-500'
+                                }`}>
+                                  Vade: {new Date(t.dueDate).toLocaleDateString('tr-TR')}
+                                </div>
+                              )}
+                            </td>
                             <td className="p-3 font-semibold text-slate-800 dark:text-slate-200">{t.description}</td>
                             <td className="p-3">
                               {t.type === 'tahsilat' ? (
@@ -617,6 +693,58 @@ export default function CustomerSupplierManager({ activePage, globalSearchQuery 
                       )}
                     </tbody>
                   </table>
+                </div>
+              </div>
+
+              {/* CRM Notes History Table */}
+              <div className="space-y-2 no-print">
+                <h4 className="font-bold text-slate-850 dark:text-white uppercase tracking-wider mt-4">
+                  CRM Görüşme / İşlem Notları
+                </h4>
+                
+                <div className="border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden bg-white dark:bg-slate-900 p-4 space-y-4">
+                  <div className="flex gap-2">
+                    <input 
+                      type="text" 
+                      value={newCrmNote}
+                      onChange={(e) => setNewCrmNote(e.target.value)}
+                      placeholder="Müşteri/Tedarikçi ile ilgili yeni bir not ekle..." 
+                      className="flex-1 p-2.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-transparent focus:ring-1 focus:ring-indigo-500"
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') handleAddCrmNote();
+                      }}
+                    />
+                    <button 
+                      onClick={handleAddCrmNote}
+                      className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-semibold cursor-pointer"
+                    >
+                      Not Ekle
+                    </button>
+                  </div>
+
+                  <div className="space-y-3 mt-4">
+                    {!(selectedContact.crmNotes && selectedContact.crmNotes.length > 0) ? (
+                      <div className="text-center text-slate-400 py-4">Henüz bir görüşme notu eklenmemiş.</div>
+                    ) : (
+                      [...selectedContact.crmNotes].reverse().map(note => (
+                        <div key={note.id} className="p-3 bg-slate-50 dark:bg-slate-850/50 border border-slate-100 dark:border-slate-800 rounded-lg flex justify-between items-start gap-3">
+                          <div>
+                            <div className="text-[10px] text-slate-450 font-semibold mb-1">
+                              {new Date(note.date).toLocaleString('tr-TR', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                            </div>
+                            <div className="text-slate-800 dark:text-slate-200">{note.text}</div>
+                          </div>
+                          <button 
+                            onClick={() => handleDeleteCrmNote(note.id)}
+                            className="p-1.5 text-slate-400 hover:text-red-500 transition rounded-md hover:bg-slate-200 dark:hover:bg-slate-800 cursor-pointer"
+                            title="Notu Sil"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      ))
+                    )}
+                  </div>
                 </div>
               </div>
 
@@ -673,15 +801,27 @@ export default function CustomerSupplierManager({ activePage, globalSearchQuery 
               </div>
 
               {/* Date */}
-              <div className="space-y-1">
-                <label className="font-semibold text-slate-500 uppercase tracking-wide">İşlem Tarihi</label>
-                <input
-                  type="date"
-                  value={transForm.date}
-                  onChange={(e) => setTransForm(prev => ({ ...prev, date: e.target.value }))}
-                  className="w-full p-2.5 border border-slate-200 dark:border-slate-800 rounded-xl bg-transparent"
-                  required
-                />
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="font-semibold text-slate-500 uppercase tracking-wide">İşlem Tarihi</label>
+                  <input
+                    type="date"
+                    value={transForm.date}
+                    onChange={(e) => setTransForm(prev => ({ ...prev, date: e.target.value }))}
+                    className="w-full p-2.5 border border-slate-200 dark:border-slate-800 rounded-xl bg-transparent"
+                    required
+                  />
+                </div>
+                
+                <div className="space-y-1">
+                  <label className="font-semibold text-slate-500 uppercase tracking-wide flex items-center gap-1">Vade Tarihi <span className="text-[9px] lowercase bg-slate-100 dark:bg-slate-800 px-1 rounded text-slate-400">opsiyonel</span></label>
+                  <input
+                    type="date"
+                    value={transForm.dueDate || ''}
+                    onChange={(e) => setTransForm(prev => ({ ...prev, dueDate: e.target.value }))}
+                    className="w-full p-2.5 border border-slate-200 dark:border-slate-800 rounded-xl bg-transparent"
+                  />
+                </div>
               </div>
 
               {/* Description */}

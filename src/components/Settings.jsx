@@ -8,7 +8,8 @@ import {
   CheckCircle,
   HelpCircle,
   Building,
-  Coins
+  Coins,
+  Lock
 } from 'lucide-react';
 import { settingsService } from '../db/services/settingsService';
 import { initDb } from '../db/services/shared';
@@ -23,7 +24,8 @@ export default function SettingsPage({ activePage }) {
 
   const [successMsg, setSuccessMsg] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
-  
+
+
   useEffect(() => {
     const loadSettings = () => setSettings(settingsService.get());
     loadSettings();
@@ -118,6 +120,8 @@ export default function SettingsPage({ activePage }) {
     }
   };
 
+
+
   return (
     <div className="space-y-6 max-w-2xl mx-auto text-xs">
       
@@ -174,7 +178,7 @@ export default function SettingsPage({ activePage }) {
 
           <button
             type="submit"
-            className="px-4 py-2 bg-indigo-605 hover:bg-indigo-700 text-white font-semibold rounded-xl cursor-pointer"
+            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-xl cursor-pointer"
           >
             Ayarları Kaydet
           </button>
@@ -184,7 +188,7 @@ export default function SettingsPage({ activePage }) {
       {/* 2. BACKUP & RESTORE DATABASE TOOL */}
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm space-y-4">
         <h3 className="font-bold text-sm uppercase tracking-wider text-slate-850 dark:text-white flex items-center gap-1.5 border-b border-slate-100 dark:border-slate-850 pb-2">
-          <Download size={16} className="text-teal-555" />
+          <Download size={16} className="text-teal-500" />
           Veritabanı Yedekleme & Geri Yükleme
         </h3>
         
@@ -244,6 +248,7 @@ export default function SettingsPage({ activePage }) {
           </button>
         </div>
       </div>
+
 
     </div>
   );

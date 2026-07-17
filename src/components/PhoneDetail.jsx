@@ -11,8 +11,10 @@ import {
   AlertCircle,
   PiggyBank,
   CheckCircle,
-  FileText
+  FileText,
+  QrCode
 } from 'lucide-react';
+import { QRCodeSVG } from 'qrcode.react';
 import { phoneService } from '../db/services/phoneService';
 import { calculatePhoneCosts } from '../db/services/shared';
 
@@ -89,6 +91,44 @@ export default function PhoneDetail({ phoneId, onClose, onDataChanged }) {
     window.print();
   };
 
+  // Print Label (QR)
+  const triggerPrintLabel = () => {
+    const svgNode = document.getElementById('qr-code-svg');
+    const svgData = new XMLSerializer().serializeToString(svgNode);
+    
+    const printWindow = window.open('', '_blank', 'width=400,height=400');
+    printWindow.document.write(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Etiket Yazdır - ${phone.model}</title>
+          <style>
+            @page { margin: 0; size: 58mm 40mm; }
+            body { 
+              margin: 0; padding: 5px; text-align: center; font-family: sans-serif;
+              width: 58mm; display: flex; flex-direction: column; align-items: center; justify-content: center;
+            }
+            .title { font-size: 10px; font-weight: bold; margin-bottom: 2px; }
+            .subtitle { font-size: 8px; color: #333; margin-bottom: 4px; }
+            .qr-container svg { width: 30mm; height: 30mm; }
+          </style>
+        </head>
+        <body>
+          <div class="title">${phone.brand} ${phone.model}</div>
+          <div class="subtitle">${phone.storage} - ${phone.color}</div>
+          <div class="qr-container">${svgData}</div>
+          <script>
+            window.onload = function() {
+              window.print();
+              setTimeout(function() { window.close(); }, 500);
+            };
+          </script>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+  };
+
   // Get Status Style
   const getStatusBadge = (status) => {
     const styles = {
@@ -96,7 +136,8 @@ export default function PhoneDetail({ phoneId, onClose, onDataChanged }) {
       'Satışta': 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400 border-emerald-200 dark:border-emerald-900/30',
       'Tamirde': 'bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400 border-amber-200 dark:border-amber-900/30',
       'Rezerve': 'bg-purple-50 text-purple-700 dark:bg-purple-950/40 dark:text-purple-400 border-purple-200 dark:border-purple-900/30',
-      'Satıldı': 'bg-slate-100 text-slate-650 dark:bg-slate-800/40 dark:text-slate-400 border-slate-200 dark:border-slate-800/40'
+      'Satıldı': 'bg-slate-100 text-slate-650 dark:bg-slate-800/40 dark:text-slate-400 border-slate-200 dark:border-slate-800/40',
+      'Hurda / Parçalandı': 'bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-400 border-red-200 dark:border-red-900/30'
     };
     return (
       <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold border ${styles[status] || styles['Stokta']}`}>
@@ -119,6 +160,14 @@ export default function PhoneDetail({ phoneId, onClose, onDataChanged }) {
           </div>
           <div className="flex items-center gap-2">
             <button 
+              onClick={triggerPrintLabel}
+              className="flex items-center gap-1.5 p-1.5 px-3 rounded-lg border border-indigo-200 dark:border-indigo-800/30 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-650 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition cursor-pointer"
+              title="Barkod/QR Etiket Yazdır"
+            >
+              <QrCode size={16} />
+              <span className="text-[10px] font-bold hidden sm:inline">QR Etiket</span>
+            </button>
+            <button 
               onClick={triggerPrintDetail}
               className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-850 text-slate-500 hover:text-indigo-650 transition cursor-pointer"
               title="Yazdır / PDF Al"
@@ -132,6 +181,11 @@ export default function PhoneDetail({ phoneId, onClose, onDataChanged }) {
               <X size={18} />
             </button>
           </div>
+        </div>
+
+        {/* Hidden QR Code for Printing */}
+        <div className="hidden">
+          <QRCodeSVG id="qr-code-svg" value={phone.id} size={100} level="H" />
         </div>
 
         {/* Modal Body (Scrollable content) */}

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { KeyRound, User, Eye, EyeOff, ShieldCheck, AlertCircle } from 'lucide-react';
+import { KeyRound, User, Eye, EyeOff, ShieldCheck, AlertCircle, Lock } from 'lucide-react';
 import { authService } from '../db/services/authService';
 
 export default function Login({ onLoginSuccess }) {
@@ -7,6 +7,12 @@ export default function Login({ onLoginSuccess }) {
   const [password, setPassword] = useState('');
   const [rememberMe, setRememberMe] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  
+  // Password change state
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -22,16 +28,45 @@ export default function Login({ onLoginSuccess }) {
     setLoading(true);
 
     try {
-      const success = await authService.login(username, password, rememberMe);
+      const result = await authService.login(username, password, rememberMe);
       setLoading(false);
-      if (success) {
-        onLoginSuccess();
+      
+      if (result.success) {
+        if (result.mustChangePassword) {
+          setIsChangingPassword(true);
+        } else {
+          onLoginSuccess();
+        }
       } else {
-        setError('Hatalı kullanıcı adı/e-posta veya şifre! (Demo: admin / 123456)');
+        setError('Hatalı kullanıcı adı/e-posta veya şifre!');
       }
     } catch (err) {
       setLoading(false);
       setError(err.message || 'Giriş yapılırken bir hata oluştu.');
+    }
+  };
+
+  const handlePasswordChange = async (e) => {
+    e.preventDefault();
+    setError('');
+
+    if (newPassword.length < 6) {
+      setError('Yeni şifreniz en az 6 karakter olmalıdır.');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setError('Şifreler eşleşmiyor.');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      await authService.changeLocalPassword(newPassword);
+      setLoading(false);
+      onLoginSuccess();
+    } catch (err) {
+      setLoading(false);
+      setError(err.message || 'Şifre değiştirilemedi.');
     }
   };
 
@@ -44,99 +79,158 @@ export default function Login({ onLoginSuccess }) {
           <div className="mx-auto w-12 h-12 bg-indigo-600 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-600/30 text-white mb-4">
             <ShieldCheck size={28} />
           </div>
-          <h2 className="text-2xl font-bold text-slate-800 dark:text-white">Giriş Yap</h2>
+          <h2 className="text-2xl font-bold text-slate-800 dark:text-white">
+            {isChangingPassword ? 'Şifre Yenileme' : 'Giriş Yap'}
+          </h2>
           <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
             Telefon Stok & Cari Takip Sistemi
           </p>
         </div>
 
         {/* Body */}
-        <form onSubmit={handleSubmit} className="px-8 pb-8 space-y-5">
-          {error && (
-            <div className="flex items-center gap-2 p-3 text-sm rounded-lg bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900 text-red-600 dark:text-red-400">
-              <AlertCircle size={18} className="shrink-0" />
-              <span>{error}</span>
-            </div>
-          )}
-
-          {/* Username */}
-          <div className="space-y-1">
-            <label className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">
-              E-posta veya Kullanıcı Adı
-            </label>
-            <div className="relative">
-              <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-400">
-                <User size={18} />
-              </span>
-              <input
-                type="text"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                placeholder="Kullanıcı adınızı girin"
-                className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-transparent text-slate-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:focus:ring-indigo-600 focus:border-transparent transition"
-              />
-            </div>
-          </div>
-
-          {/* Password */}
-          <div className="space-y-1">
-            <label className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">
-              Şifre
-            </label>
-            <div className="relative">
-              <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-400">
-                <KeyRound size={18} />
-              </span>
-              <input
-                type={showPassword ? 'text' : 'password'}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••"
-                className="w-full pl-10 pr-10 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-transparent text-slate-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:focus:ring-indigo-600 focus:border-transparent transition"
-              />
-              <button
-                type="button"
-                onClick={() => setShowPassword(!showPassword)}
-                className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
-              >
-                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-              </button>
-            </div>
-          </div>
-
-          {/* Remember Me */}
-          <div className="flex items-center justify-between pt-1">
-            <label className="flex items-center gap-2 cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={rememberMe}
-                onChange={(e) => setRememberMe(e.target.checked)}
-                className="rounded border-slate-300 dark:border-slate-700 text-indigo-600 focus:ring-indigo-500 dark:focus:ring-indigo-600 dark:bg-slate-800 w-4.5 h-4.5"
-              />
-              <span className="text-sm text-slate-600 dark:text-slate-400">Beni Hatırla</span>
-            </label>
-          </div>
-
-          {/* Submit Button */}
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full py-3 px-4 rounded-xl text-white font-semibold bg-indigo-600 hover:bg-indigo-700 active:scale-[0.98] transition-all duration-150 disabled:opacity-50 shadow-lg shadow-indigo-600/20 flex items-center justify-center gap-2 cursor-pointer"
-          >
-            {loading ? (
-              <span className="border-2 border-white border-t-transparent rounded-full w-5 h-5 animate-spin"></span>
-            ) : (
-              'Giriş Yap'
+        {!isChangingPassword ? (
+          <form onSubmit={handleSubmit} className="px-8 pb-8 space-y-5">
+            {error && (
+              <div className="flex items-center gap-2 p-3 text-sm rounded-lg bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900 text-red-600 dark:text-red-400">
+                <AlertCircle size={18} className="shrink-0" />
+                <span>{error}</span>
+              </div>
             )}
-          </button>
-        </form>
 
-        {/* Footer info */}
-        <div className="px-8 py-4 bg-slate-50 dark:bg-slate-900/50 border-t border-slate-100 dark:border-slate-800 text-center">
-          <p className="text-xs text-slate-400 dark:text-slate-500">
-            Varsayılan Giriş: <strong>admin</strong> / <strong>123456</strong>
-          </p>
-        </div>
+            {/* Username */}
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">
+                E-posta veya Kullanıcı Adı
+              </label>
+              <div className="relative">
+                <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-400">
+                  <User size={18} />
+                </span>
+                <input
+                  type="text"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  placeholder="Kullanıcı adınızı girin"
+                  className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-transparent text-slate-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:focus:ring-indigo-600 focus:border-transparent transition"
+                />
+              </div>
+            </div>
+
+            {/* Password */}
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">
+                Şifre
+              </label>
+              <div className="relative">
+                <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-400">
+                  <KeyRound size={18} />
+                </span>
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••"
+                  className="w-full pl-10 pr-10 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-transparent text-slate-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:focus:ring-indigo-600 focus:border-transparent transition"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+                >
+                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+              </div>
+            </div>
+
+            {/* Remember Me */}
+            <div className="flex items-center justify-between pt-1">
+              <label className="flex items-center gap-2 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={rememberMe}
+                  onChange={(e) => setRememberMe(e.target.checked)}
+                  className="rounded border-slate-300 dark:border-slate-700 text-indigo-600 focus:ring-indigo-500 dark:focus:ring-indigo-600 dark:bg-slate-800 w-4.5 h-4.5"
+                />
+                <span className="text-sm text-slate-600 dark:text-slate-400">Beni Hatırla</span>
+              </label>
+            </div>
+
+            {/* Submit Button */}
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full py-3 px-4 rounded-xl text-white font-semibold bg-indigo-600 hover:bg-indigo-700 active:scale-[0.98] transition-all duration-150 disabled:opacity-50 shadow-lg shadow-indigo-600/20 flex items-center justify-center gap-2 cursor-pointer"
+            >
+              {loading ? (
+                <span className="border-2 border-white border-t-transparent rounded-full w-5 h-5 animate-spin"></span>
+              ) : (
+                'Giriş Yap'
+              )}
+            </button>
+          </form>
+        ) : (
+          <form onSubmit={handlePasswordChange} className="px-8 pb-8 space-y-5">
+            <div className="p-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900 rounded-xl text-sm text-amber-700 dark:text-amber-400 mb-4">
+              Güvenliğiniz için varsayılan şifrenizi değiştirmeniz gerekmektedir. Lütfen yeni bir şifre belirleyin.
+            </div>
+            
+            {error && (
+              <div className="flex items-center gap-2 p-3 text-sm rounded-lg bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900 text-red-600 dark:text-red-400">
+                <AlertCircle size={18} className="shrink-0" />
+                <span>{error}</span>
+              </div>
+            )}
+
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">
+                Yeni Şifre
+              </label>
+              <div className="relative">
+                <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-400">
+                  <Lock size={18} />
+                </span>
+                <input
+                  type="password"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  placeholder="En az 6 karakter"
+                  className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-transparent text-slate-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:focus:ring-indigo-600"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">
+                Yeni Şifre (Tekrar)
+              </label>
+              <div className="relative">
+                <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-400">
+                  <Lock size={18} />
+                </span>
+                <input
+                  type="password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  placeholder="Şifrenizi tekrar girin"
+                  className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-transparent text-slate-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:focus:ring-indigo-600"
+                />
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full py-3 px-4 rounded-xl text-white font-semibold bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] transition-all duration-150 disabled:opacity-50 shadow-lg shadow-emerald-600/20 flex items-center justify-center gap-2 cursor-pointer"
+            >
+              {loading ? (
+                <span className="border-2 border-white border-t-transparent rounded-full w-5 h-5 animate-spin"></span>
+              ) : (
+                'Şifreyi Güncelle ve Devam Et'
+              )}
+            </button>
+          </form>
+        )}
+
       </div>
     </div>
   );

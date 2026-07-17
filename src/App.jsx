@@ -24,6 +24,8 @@ export default function App() {
   const [selectedPhoneId, setSelectedPhoneId] = useState(null);
   const [openPhoneDetail, setOpenPhoneDetail] = useState(false);
 
+
+
   // Initialize DB and Check Authentication
   useEffect(() => {
     initDb();
@@ -70,9 +72,14 @@ export default function App() {
 
     const pullFromCloud = async () => {
       try {
+        const { data: authData } = await supabase.auth.getUser();
+        const owner_id = authData?.user?.id;
+        if (!owner_id) return;
+
         const { data, error } = await supabase
           .from('tys_data')
-          .select('*');
+          .select('*')
+          .eq('owner_id', owner_id);
           
         if (error) {
           console.error("Supabase pull error:", error);
@@ -102,9 +109,27 @@ export default function App() {
     // Initial pull
     pullFromCloud();
 
-    // Check for updates every 10 seconds (Polling)
-    const interval = setInterval(pullFromCloud, 10000);
-    return () => clearInterval(interval);
+    // Supabase Realtime Subscription
+    let subscription;
+    if (isSupabaseConfigured) {
+      subscription = supabase
+        .channel('public:tys_data')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'tys_data' }, (payload) => {
+          // When a change is detected in DB, pull fresh data
+          pullFromCloud();
+        })
+        .subscribe();
+    }
+
+    // Fallback polling just in case websocket disconnects
+    const interval = setInterval(pullFromCloud, 30000);
+
+    return () => {
+      clearInterval(interval);
+      if (subscription) {
+        supabase.removeChannel(subscription);
+      }
+    };
   }, []);
 
   const handleLoginSuccess = () => {
@@ -162,6 +187,8 @@ export default function App() {
   if (!isLoggedIn) {
     return <Login onLoginSuccess={handleLoginSuccess} />;
   }
+
+
 
   // Authenticated Layout
   return (

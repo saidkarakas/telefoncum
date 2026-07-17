@@ -116,20 +116,40 @@ Bu yazılımı bir dükkana/müşteriye satıp teslim edeceğiniz zaman, veriler
 2. **New Query** butonuna basın, aşağıdaki SQL kodunu yapıştırın ve sağ alttaki **Run** butonuna basın. Bu komut, uygulamanın esnek şemasını barındıracak `jsonb` tablosunu ve izinlerini kuracaktır:
 
 ```sql
--- tys_data tablosunu oluştur
+-- 1. tys_data (Ana Veri) tablosunu oluştur
 create table tys_data (
   key text primary key,
   value jsonb,
-  updated_at timestamp with time zone default timezone('utc'::text, now()) not null
+  updated_at timestamp with time zone default timezone('utc'::text, now()) not null,
+  owner_id uuid references auth.users(id) default auth.uid()
 );
 
 -- Satır Düzeyinde Güvenliği Aktif Et
 alter table tys_data enable row level security;
 
--- Herkese okuma ve yazma/güncelleme izinlerini tanımla (Public Policies)
-create policy "Allow public read" on tys_data for select using (true);
-create policy "Allow public insert" on tys_data for insert with check (true);
-create policy "Allow public update" on tys_data for update using (true);
+-- Güvenli politikaları tanımla (Kullanıcılar sadece kendi verilerine erişebilir)
+create policy "Kullanici kendi verisini okuyabilir" on tys_data for select using (auth.uid() = owner_id);
+create policy "Kullanici kendi verisini ekleyebilir" on tys_data for insert with check (auth.uid() = owner_id);
+create policy "Kullanici kendi verisini guncelleyebilir" on tys_data for update using (auth.uid() = owner_id);
+create policy "Kullanici kendi verisini silebilir" on tys_data for delete using (auth.uid() = owner_id);
+
+-- 2. tys_audit_log (İşlem Geçmişi) tablosunu oluştur
+CREATE TABLE IF NOT EXISTS public.tys_audit_log (
+    id uuid default gen_random_uuid() primary key,
+    owner_id uuid references auth.users(id) default auth.uid(),
+    action text not null,
+    entity_type text not null,
+    entity_id text,
+    old_value jsonb,
+    new_value jsonb,
+    created_at timestamp with time zone default now()
+);
+
+ALTER TABLE public.tys_audit_log ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Kullanici islem gecmisini okuyabilir" ON public.tys_audit_log FOR SELECT USING (auth.uid() = owner_id);
+CREATE POLICY "Kullanici islem gecmisine ekleme yapabilir" ON public.tys_audit_log FOR INSERT WITH CHECK (auth.uid() = owner_id);
+-- Silme veya güncelleme (update/delete) kasıtlı olarak engellenmiştir!
 ```
 
 ### 3. Yapılandırma Dosyasını Hazırlama (`.env`)

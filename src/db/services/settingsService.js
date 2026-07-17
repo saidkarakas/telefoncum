@@ -27,14 +27,36 @@ export const settingsService = {
   importDatabase: (jsonString) => {
     try {
       const db = JSON.parse(jsonString);
-      Object.keys(db).forEach(k => {
-        if (db[k] !== null) {
-          localStorage.setItem(k, db[k]);
+      if (!db || typeof db !== 'object' || Array.isArray(db)) {
+        throw new Error("Geçersiz yedek formatı.");
+      }
+
+      // Validasyon aşaması: Sadece geçerli anahtarları ve bozuk olmayan JSON verilerini kabul et
+      const validKeys = [...Object.values(STORAGE_KEYS), 'tys_admin_user'];
+      const dataToSave = {};
+
+      for (const key of Object.keys(db)) {
+        if (validKeys.includes(key) && db[key]) {
+           try {
+             JSON.parse(db[key]); // Sadece geçerli JSON ise hata atmaz
+             dataToSave[key] = db[key];
+           } catch (err) {
+             throw new Error(`'${key}' verisi bozuk veya geçersiz formatta.`);
+           }
         }
+      }
+
+      if (Object.keys(dataToSave).length === 0) {
+        throw new Error("Yedek dosyasında aktarılacak geçerli veri bulunamadı.");
+      }
+
+      // Hata fırlatılmadıysa güvenle kaydet
+      Object.keys(dataToSave).forEach(k => {
+        localStorage.setItem(k, dataToSave[k]);
       });
       return true;
     } catch (e) {
-      throw new Error("Yedek dosyası geçersiz veya bozuk.");
+      throw new Error(e.message || "Yedek dosyası geçersiz veya bozuk.");
     }
   }
 };

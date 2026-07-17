@@ -16,6 +16,7 @@ import {
   User
 } from 'lucide-react';
 import { settingsService } from '../db/services/settingsService';
+import { STORAGE_KEYS, getJson } from '../db/services/shared';
 
 export default function Layout({ 
   children, 
@@ -59,15 +60,21 @@ export default function Layout({
     setTheme(prev => prev === 'dark' ? 'light' : 'dark');
   };
 
-  const menuItems = [
+  // Get User Role
+  const session = getJson(STORAGE_KEYS.AUTH, { role: 'admin' });
+  const userRole = session?.role || 'admin';
+
+  const allMenuItems = [
     { id: 'dashboard', label: 'Panel', icon: LayoutDashboard },
     { id: 'phones', label: 'Stok (Cihazlar)', icon: Smartphone },
-    { id: 'contacts', label: 'Cari & Kişiler', icon: Users },
+    { id: 'contacts', label: 'Cari & Kişiler', icon: Users, hideFor: ['teknisyen'] },
     { id: 'repairs', label: 'Tamir Takibi', icon: Wrench },
-    { id: 'expenses', label: 'Genel Giderler', icon: Receipt },
-    { id: 'reports', label: 'Raporlar', icon: BarChart3 },
-    { id: 'settings', label: 'Ayarlar', icon: Settings },
+    { id: 'expenses', label: 'Genel Giderler', icon: Receipt, hideFor: ['teknisyen'] },
+    { id: 'reports', label: 'Raporlar', icon: BarChart3, hideFor: ['teknisyen'] },
+    { id: 'settings', label: 'Ayarlar', icon: Settings, hideFor: ['teknisyen'] },
   ];
+
+  const menuItems = allMenuItems.filter(item => !(item.hideFor && item.hideFor.includes(userRole)));
 
   return (
     <div className="min-h-screen flex bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 transition-colors duration-200">

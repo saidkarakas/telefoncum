@@ -115,9 +115,49 @@ export default function ExpenseManager({ activePage, globalSearchQuery }) {
 
   const grandTotalAllTime = Object.values(categorySummary).reduce((a, b) => a + b, 0);
 
+  // AI Smart Expense Estimation (Madde 47)
+  const calculateAiEstimation = () => {
+    // Only care about recurring ones
+    const recurringCats = ['Kira', 'Elektrik', 'İnternet'];
+    const now = new Date();
+    // Look at last 3 full months
+    const threeMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 3, 1);
+    
+    let totalRecurring = 0;
+    let monthsCounted = new Set();
+    
+    expenses.forEach(e => {
+      if (recurringCats.includes(e.category)) {
+        const d = new Date(e.date);
+        if (d >= threeMonthsAgo && d < new Date(now.getFullYear(), now.getMonth(), 1)) {
+          totalRecurring += e.amount;
+          monthsCounted.add(`${d.getFullYear()}-${d.getMonth()}`);
+        }
+      }
+    });
+
+    // Average per month
+    const distinctMonths = monthsCounted.size > 0 ? monthsCounted.size : 1;
+    return Math.round(totalRecurring / distinctMonths);
+  };
+
+  const aiEstimation = calculateAiEstimation();
+
   return (
     <div className="space-y-6">
       
+      {aiEstimation > 0 && (
+        <div className="p-3 bg-indigo-50 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-900 rounded-xl flex items-center justify-between text-indigo-700 dark:text-indigo-400 text-xs shadow-sm">
+          <div className="flex items-center gap-2">
+            <span className="text-base">💡</span>
+            <span className="font-semibold tracking-wide">AI Gider Tahmini:</span>
+            Geçmiş aylara dayanarak bu ayki muhtemel sabit giderleriniz (Kira, Elektrik, İnternet) yaklaşık 
+            <strong className="ml-1 text-indigo-900 dark:text-indigo-300">{aiEstimation.toLocaleString('tr-TR')} TL</strong> olacaktır. 
+            Kasada bu tutarı hazır bulundurmanız önerilir.
+          </div>
+        </div>
+      )}
+
       {/* SUMMARY DASHBOARD METRICS */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         

@@ -29,6 +29,17 @@ export const reportService = {
       .sort((a, b) => b.daysInStock - a.daysInStock)
       .slice(0, 5);
 
+    // Upsell Renewal Bot (Madde 14)
+    // Find phones sold roughly 1 year ago (between 330 and 395 days ago)
+    const nowTs = new Date().getTime();
+    const oneDay = 24 * 60 * 60 * 1000;
+    const upsellCandidates = soldPhones.filter(p => {
+      if (!p.salesDate) return false;
+      const soldTs = new Date(p.salesDate).getTime();
+      const diffDays = Math.floor((nowTs - soldTs) / oneDay);
+      return diffDays >= 330 && diffDays <= 395;
+    }).sort((a, b) => new Date(b.salesDate) - new Date(a.salesDate));
+
     return {
       cards: {
         stockCount,
@@ -43,7 +54,8 @@ export const reportService = {
       lists: {
         recentAdded,
         recentSold,
-        longWaiting
+        longWaiting,
+        upsellCandidates
       }
     };
   },

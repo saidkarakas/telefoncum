@@ -1,8 +1,11 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { X, AlertCircle } from 'lucide-react';
 import { usePhone, BRAND_MODELS } from '../context/PhoneContext';
+import BarcodeScanner from './BarcodeScanner';
+import { ScanLine } from 'lucide-react';
 
 export default function PhoneForm() {
+  const [scannerField, setScannerField] = useState(null);
   const {
     showAddEditModal,
     setShowAddEditModal,
@@ -180,6 +183,7 @@ export default function PhoneForm() {
                       <option value="Satışta">Satışta</option>
                       <option value="Tamirde">Tamirde</option>
                       <option value="Rezerve">Rezerve</option>
+                      <option value="Hurda / Parçalandı">Hurda / Parçalandı</option>
                       {formData.status === 'Satıldı' && <option value="Satıldı">Satıldı</option>}
                     </select>
                   </div>
@@ -190,19 +194,29 @@ export default function PhoneForm() {
                   <div className="space-y-1">
                     <div className="flex justify-between items-center">
                       <label className="font-semibold text-slate-500 uppercase tracking-wide">IMEI 1 *</label>
-                      {formData.imei1 && formData.imei1.length === 15 && (
+                      <div className="flex gap-2 items-center">
+                        {formData.imei1 && formData.imei1.length === 15 && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              navigator.clipboard.writeText(formData.imei1);
+                              window.open("https://www.turkiye.gov.tr/imei-sorgulama", "_blank");
+                            }}
+                            className="text-[10px] text-indigo-600 dark:text-indigo-400 font-bold hover:underline cursor-pointer flex items-center gap-0.5"
+                            title="IMEI 1 Kopyala ve e-Devlet'te Aç"
+                          >
+                            📋 BTK'da Sorgula
+                          </button>
+                        )}
                         <button
                           type="button"
-                          onClick={() => {
-                            navigator.clipboard.writeText(formData.imei1);
-                            window.open("https://www.turkiye.gov.tr/imei-sorgulama", "_blank");
-                          }}
-                          className="text-[10px] text-indigo-600 dark:text-indigo-400 font-bold hover:underline cursor-pointer flex items-center gap-0.5"
-                          title="IMEI 1 Kopyala ve e-Devlet'te Aç"
+                          onClick={() => setScannerField('imei1')}
+                          className="text-[10px] text-teal-600 dark:text-teal-400 font-bold hover:underline cursor-pointer flex items-center gap-0.5"
+                          title="Kameradan Tara"
                         >
-                          📋 BTK'da Sorgula
+                          <ScanLine size={12} /> Tara
                         </button>
-                      )}
+                      </div>
                     </div>
                     <input
                       type="text"
@@ -218,19 +232,29 @@ export default function PhoneForm() {
                   <div className="space-y-1">
                     <div className="flex justify-between items-center">
                       <label className="font-semibold text-slate-500 uppercase tracking-wide">IMEI 2 (Varsa)</label>
-                      {formData.imei2 && formData.imei2.length === 15 && (
+                      <div className="flex gap-2 items-center">
+                        {formData.imei2 && formData.imei2.length === 15 && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              navigator.clipboard.writeText(formData.imei2);
+                              window.open("https://www.turkiye.gov.tr/imei-sorgulama", "_blank");
+                            }}
+                            className="text-[10px] text-indigo-600 dark:text-indigo-400 font-bold hover:underline cursor-pointer flex items-center gap-0.5"
+                            title="IMEI 2 Kopyala ve e-Devlet'te Aç"
+                          >
+                            📋 BTK'da Sorgula
+                          </button>
+                        )}
                         <button
                           type="button"
-                          onClick={() => {
-                            navigator.clipboard.writeText(formData.imei2);
-                            window.open("https://www.turkiye.gov.tr/imei-sorgulama", "_blank");
-                          }}
-                          className="text-[10px] text-indigo-600 dark:text-indigo-400 font-bold hover:underline cursor-pointer flex items-center gap-0.5"
-                          title="IMEI 2 Kopyala ve e-Devlet'te Aç"
+                          onClick={() => setScannerField('imei2')}
+                          className="text-[10px] text-teal-600 dark:text-teal-400 font-bold hover:underline cursor-pointer flex items-center gap-0.5"
+                          title="Kameradan Tara"
                         >
-                          📋 BTK'da Sorgula
+                          <ScanLine size={12} /> Tara
                         </button>
-                      )}
+                      </div>
                     </div>
                     <input
                       type="text"
@@ -486,7 +510,24 @@ export default function PhoneForm() {
 
                   {/* Purchase Price */}
                   <div className="space-y-1">
-                    <label className="font-semibold text-slate-500 uppercase tracking-wide">Alış Fiyatı *</label>
+                    <label className="font-semibold text-slate-500 uppercase tracking-wide flex justify-between">
+                      <span>Alış Fiyatı *</span>
+                      {(() => {
+                        if (formData.brand && formData.model) {
+                          const phones = require('../db/services/phoneService').phoneService.getAll();
+                          const pastMatches = phones.filter(p => p.brand === formData.brand && p.model === formData.model && p.purchasePrice && p.id !== editingPhone?.id);
+                          if (pastMatches.length > 0) {
+                            const avgPrice = Math.round(pastMatches.reduce((acc, p) => acc + Number(p.purchasePrice), 0) / pastMatches.length);
+                            return (
+                              <span className="text-[10px] text-indigo-500 font-bold flex items-center gap-1">
+                                💡 AI Önerisi: ~{avgPrice.toLocaleString('tr-TR')} ₺
+                              </span>
+                            );
+                          }
+                        }
+                        return null;
+                      })()}
+                    </label>
                     <div className="relative">
                       <input
                         type="number"
@@ -624,7 +665,24 @@ export default function PhoneForm() {
               <div className="grid grid-cols-2 gap-3">
                 {/* Sales Price */}
                 <div className="space-y-1">
-                  <label className="font-semibold text-slate-500 uppercase tracking-wide block">Satış Fiyatı *</label>
+                  <label className="font-semibold text-slate-500 uppercase tracking-wide flex justify-between">
+                    <span>Satış Fiyatı *</span>
+                    {(() => {
+                      if (sellingPhone?.brand && sellingPhone?.model) {
+                        const phones = require('../db/services/phoneService').phoneService.getAll();
+                        const pastMatches = phones.filter(p => p.brand === sellingPhone.brand && p.model === sellingPhone.model && p.salesPrice && p.id !== sellingPhone.id);
+                        if (pastMatches.length > 0) {
+                          const avgPrice = Math.round(pastMatches.reduce((acc, p) => acc + Number(p.salesPrice), 0) / pastMatches.length);
+                          return (
+                            <span className="text-[10px] text-indigo-500 font-bold flex items-center gap-1">
+                              💡 AI Önerisi: ~{avgPrice.toLocaleString('tr-TR')} ₺
+                            </span>
+                          );
+                        }
+                      }
+                      return null;
+                    })()}
+                  </label>
                   <div className="relative">
                     <input
                       type="number"
@@ -728,6 +786,16 @@ export default function PhoneForm() {
             </div>
           </div>
         </div>
+      )}
+      {/* BARCODE SCANNER MODAL */}
+      {scannerField && (
+        <BarcodeScanner
+          onScan={(data) => {
+            setFormData(prev => ({ ...prev, [scannerField]: data.replace(/\D/g, '').slice(0, 15) }));
+            setScannerField(null);
+          }}
+          onClose={() => setScannerField(null)}
+        />
       )}
     </>
   );

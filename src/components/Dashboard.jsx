@@ -9,7 +9,8 @@ import {
   Clock, 
   Calendar, 
   ChevronRight,
-  TrendingDown
+  TrendingDown,
+  PhoneCall
 } from 'lucide-react';
 import { reportService } from '../db/services/reportService';
 
@@ -17,9 +18,48 @@ export default function Dashboard({ setActivePage, setSelectedPhoneId, setOpenPh
   const [data, setData] = useState(null);
 
   useEffect(() => {
-    const refreshData = () => {
-      setData(reportService.getDashboardData());
+    const triggerNotifications = (dashboardData) => {
+      const lastNotify = localStorage.getItem('tys_last_notify');
+      const now = Date.now();
+      if (lastNotify && now - parseInt(lastNotify) < 3600000) return; // 1 hour cooldown
+
+      const messages = [];
+      if (dashboardData.cards.stockCount < 5) {
+        messages.push(`Kritik Stok: Sadece ${dashboardData.cards.stockCount} cihaz kaldı.`);
+      }
+      if (dashboardData.cards.pendingRepairs > 0) {
+        messages.push(`${dashboardData.cards.pendingRepairs} adet bekleyen tamir işlemi var.`);
+      }
+
+      if (messages.length > 0) {
+        if (navigator.serviceWorker && navigator.serviceWorker.controller) {
+          navigator.serviceWorker.controller.postMessage({
+            type: 'SHOW_NOTIFICATION',
+            title: 'TYS Sistem Uyarısı',
+            options: { body: messages.join('\n') }
+          });
+        } else if ("Notification" in window && Notification.permission === "granted") {
+          new Notification('TYS Sistem Uyarısı', { body: messages.join('\n') });
+        }
+        localStorage.setItem('tys_last_notify', now.toString());
+      }
     };
+
+    const refreshData = () => {
+      const dashData = reportService.getDashboardData();
+      setData(dashData);
+
+      if ("Notification" in window) {
+        if (Notification.permission === "granted") {
+          triggerNotifications(dashData);
+        } else if (Notification.permission !== "denied") {
+          Notification.requestPermission().then(permission => {
+            if (permission === "granted") triggerNotifications(dashData);
+          });
+        }
+      }
+    };
+
     refreshData();
     window.addEventListener('tys_db_update', refreshData);
     return () => window.removeEventListener('tys_db_update', refreshData);
@@ -39,21 +79,24 @@ export default function Dashboard({ setActivePage, setSelectedPhoneId, setOpenPh
       value: cards.stockCount,
       desc: 'Aktif Satışta & Stokta',
       icon: Smartphone,
-      color: 'from-blue-500/10 to-indigo-500/10 text-blue-600 dark:text-blue-400 border-blue-100 dark:border-blue-900/50'
+      color: 'from-blue-500/10 to-indigo-500/10 text-blue-600 dark:text-blue-400 border-blue-100 dark:border-blue-900/50',
+      action: 'phones'
     },
     {
       title: 'Toplam Stok Maliyeti',
       value: `${cards.totalStockCost.toLocaleString('tr-TR')} TL`,
       desc: 'Alış + Yapılan Masraflar',
       icon: DollarSign,
-      color: 'from-amber-500/10 to-orange-500/10 text-amber-600 dark:text-amber-400 border-amber-100 dark:border-amber-900/50'
+      color: 'from-amber-500/10 to-orange-500/10 text-amber-600 dark:text-amber-400 border-amber-100 dark:border-amber-900/50',
+      action: 'phones'
     },
     {
       title: 'Toplam Satış Tutarı',
       value: `${cards.totalSalesAmount.toLocaleString('tr-TR')} TL`,
       desc: 'Satılan Cihazların Ciro Toplamı',
       icon: CheckCircle2,
-      color: 'from-emerald-500/10 to-teal-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-100 dark:border-emerald-900/50'
+      color: 'from-emerald-500/10 to-teal-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-100 dark:border-emerald-900/50',
+      action: 'reports'
     },
     {
       title: 'Toplam Net Kar',
@@ -62,35 +105,40 @@ export default function Dashboard({ setActivePage, setSelectedPhoneId, setOpenPh
       icon: TrendingUp,
       color: cards.totalProfit >= 0 
         ? 'from-indigo-500/10 to-purple-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-100 dark:border-indigo-900/50'
-        : 'from-red-500/10 to-rose-500/10 text-red-600 dark:text-red-400 border-red-100 dark:border-red-900/50'
+        : 'from-red-500/10 to-rose-500/10 text-red-600 dark:text-red-400 border-red-100 dark:border-red-900/50',
+      action: 'reports'
     },
     {
       title: 'Bugün Alınan',
       value: cards.boughtToday,
       desc: 'Bugün Eklenen Cihazlar',
       icon: ShoppingCart,
-      color: 'from-sky-500/10 to-cyan-500/10 text-sky-600 dark:text-sky-400 border-sky-100 dark:border-sky-900/50'
+      color: 'from-sky-500/10 to-cyan-500/10 text-sky-600 dark:text-sky-400 border-sky-100 dark:border-sky-900/50',
+      action: 'phones'
     },
     {
       title: 'Bugün Satılan',
       value: cards.soldToday,
       desc: 'Bugün Çıkışı Yapılanlar',
       icon: Calendar,
-      color: 'from-green-500/10 to-emerald-500/10 text-green-600 dark:text-green-400 border-green-100 dark:border-green-900/50'
+      color: 'from-green-500/10 to-emerald-500/10 text-green-600 dark:text-green-400 border-green-100 dark:border-green-900/50',
+      action: 'phones'
     },
     {
       title: 'Tamirdeki Telefon',
       value: cards.inRepair,
       desc: 'Serviste İşlem Görenler',
       icon: Wrench,
-      color: 'from-violet-500/10 to-fuchsia-500/10 text-violet-600 dark:text-violet-400 border-violet-100 dark:border-violet-900/50'
+      color: 'from-violet-500/10 to-fuchsia-500/10 text-violet-600 dark:text-violet-400 border-violet-100 dark:border-violet-900/50',
+      action: 'repairs'
     },
     {
       title: 'Bekleyen Telefon',
       value: cards.pendingRepairs,
       desc: 'Kabul Sırasında Bekleyen',
       icon: Clock,
-      color: 'from-rose-500/10 to-red-500/10 text-rose-600 dark:text-rose-400 border-rose-100 dark:border-rose-900/50'
+      color: 'from-rose-500/10 to-red-500/10 text-rose-600 dark:text-rose-400 border-rose-100 dark:border-rose-900/50',
+      action: 'repairs'
     }
   ];
 
@@ -124,7 +172,8 @@ export default function Dashboard({ setActivePage, setSelectedPhoneId, setOpenPh
           return (
             <div 
               key={idx}
-              className={`p-4 rounded-2xl bg-gradient-to-br ${item.color} border flex flex-col justify-between shadow-sm transition-all hover:scale-[1.01]`}
+              onClick={() => item.action && setActivePage(item.action)}
+              className={`p-4 rounded-2xl bg-gradient-to-br ${item.color} border flex flex-col justify-between shadow-sm transition-all hover:scale-[1.01] ${item.action ? 'cursor-pointer' : ''}`}
             >
               <div className="flex justify-between items-start">
                 <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 block tracking-wide truncate max-w-[80%]">
@@ -318,6 +367,57 @@ export default function Dashboard({ setActivePage, setSelectedPhoneId, setOpenPh
             </table>
           </div>
         </div>
+
+        {/* 1 Yıl Önce Satılanlar / Yenileme Teklifi Botu */}
+        {lists.upsellCandidates && lists.upsellCandidates.length > 0 && (
+          <div className="bg-white dark:bg-slate-900 border border-blue-200 dark:border-blue-900/50 rounded-2xl p-5 shadow-sm lg:col-span-2">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="font-bold text-sm text-blue-800 dark:text-blue-400 uppercase tracking-wider flex items-center gap-1.5">
+                <PhoneCall size={16} />
+                <span>Yenileme Teklifi Fırsatları (1 Yıl Önce Satılanlar)</span>
+                <span className="bg-blue-100 text-blue-800 dark:bg-blue-950/40 dark:text-blue-450 px-1.5 py-0.5 rounded text-[10px] uppercase font-bold">Bot</span>
+              </h3>
+            </div>
+            
+            <p className="text-[11px] text-slate-500 mb-4">
+              Aşağıdaki cihazlar yaklaşık 1 yıl önce satıldı. Müşterilere ulaşıp cihazlarını yenilemek veya kılıf/ekran koruyucu gibi aksesuarlar satmak için harika bir fırsat!
+            </p>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead>
+                  <tr className="border-b border-blue-100 dark:border-blue-900/30 text-blue-600 dark:text-blue-500 uppercase font-semibold">
+                    <th className="py-2.5 pb-2">Model</th>
+                    <th className="py-2.5 pb-2">Satış Tarihi</th>
+                    <th className="py-2.5 pb-2">Geçen Süre</th>
+                    <th className="py-2.5 pb-2 text-right">Müşteri Numarası</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-blue-50 dark:divide-blue-900/20">
+                  {lists.upsellCandidates.map(phone => {
+                    const daysAgo = Math.floor((new Date().getTime() - new Date(phone.salesDate).getTime()) / (1000 * 3600 * 24));
+                    return (
+                      <tr 
+                        key={phone.id}
+                        onClick={() => handleViewDetail(phone.id)}
+                        className="hover:bg-blue-50/50 dark:hover:bg-blue-950/20 cursor-pointer transition-colors"
+                      >
+                        <td className="py-3 font-medium text-slate-800 dark:text-slate-250">
+                          {phone.brand} {phone.model} <span className="text-[10px] text-slate-400">({phone.storage})</span>
+                        </td>
+                        <td className="py-3 text-slate-500">{new Date(phone.salesDate).toLocaleDateString('tr-TR')}</td>
+                        <td className="py-3 font-semibold text-blue-700 dark:text-blue-400">{daysAgo} Gün</td>
+                        <td className="py-3 text-right font-medium text-slate-600 dark:text-slate-400">
+                          {phone.customerPhone || 'Kayıtlı Değil'}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
 
       </div>
 
