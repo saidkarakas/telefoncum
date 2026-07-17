@@ -8,14 +8,20 @@ const checkLockout = () => {
   if (!lockDataStr) return null;
   const lockData = JSON.parse(lockDataStr);
   const now = new Date().getTime();
+  
   if (lockData.lockedUntil && now < lockData.lockedUntil) {
     const remainingSecs = Math.ceil((lockData.lockedUntil - now) / 1000);
-    throw new Error(`Çok fazla hatalı deneme! Lütfen ${remainingSecs} saniye bekleyin.`);
+    const mins = Math.floor(remainingSecs / 60);
+    const secs = remainingSecs % 60;
+    const timeStr = mins > 0 ? `${mins} dk ${secs} sn` : `${secs} saniye`;
+    throw new Error(`Brute-force (Saldırı) koruması aktif! Lütfen ${timeStr} bekleyin.`);
   }
-  // Clear if expired
+  
+  // Sadece süre dolmuşsa ama attemptleri tamamen sıfırlama (hemen art arda denerse diye)
+  // Başarılı girişte tamamen sıfırlanıyor zaten.
   if (lockData.lockedUntil && now >= lockData.lockedUntil) {
-    localStorage.removeItem(LOCK_KEY);
-    return null;
+    lockData.lockedUntil = null;
+    saveJson(LOCK_KEY, lockData);
   }
   return lockData;
 };
@@ -23,13 +29,23 @@ const checkLockout = () => {
 const recordFailedAttempt = () => {
   let lockData = getJson(LOCK_KEY, { attempts: 0 });
   lockData.attempts += 1;
-  if (lockData.attempts >= 5) {
-    lockData.lockedUntil = new Date().getTime() + 60 * 1000; // 60 seconds
-  }
-  saveJson(LOCK_KEY, lockData);
-  if (lockData.attempts >= 5) {
+  
+  // Üstel bekleme süresi (Exponential Backoff)
+  if (lockData.attempts >= 15) {
+    lockData.lockedUntil = new Date().getTime() + 60 * 60 * 1000; // 1 saat kilit
+    saveJson(LOCK_KEY, lockData);
+    throw new Error(`Çok fazla saldırı girişimi! Sistem 1 saat kilitlendi.`);
+  } else if (lockData.attempts >= 10) {
+    lockData.lockedUntil = new Date().getTime() + 15 * 60 * 1000; // 15 dakika kilit
+    saveJson(LOCK_KEY, lockData);
+    throw new Error(`Şüpheli işlem tespiti! Sistem 15 dakika kilitlendi.`);
+  } else if (lockData.attempts >= 5) {
+    lockData.lockedUntil = new Date().getTime() + 60 * 1000; // 1 dakika kilit
+    saveJson(LOCK_KEY, lockData);
     throw new Error(`Çok fazla hatalı deneme! Lütfen 60 saniye bekleyin.`);
   }
+  
+  saveJson(LOCK_KEY, lockData);
 };
 
 const clearFailedAttempts = () => {
@@ -40,38 +56,8 @@ export const authService = {
   login: async (usernameOrEmail, password, rememberMe) => {
     checkLockout();
 
-    // 1. Check Local Admin first
-    const userStr = localStorage.getItem('tys_admin_user');
-    let localMatched = false;
-    let localUser = null;
-
-    if (userStr) {
-      localUser = JSON.parse(userStr);
-      const hashedInput = await hashPassword(password);
-      if (
-        usernameOrEmail.trim().toLowerCase() === localUser.username.toLowerCase() && 
-        hashedInput === localUser.passwordHash
-      ) {
-        localMatched = true;
-      }
-    }
-
-    if (localMatched) {
-      clearFailedAttempts();
-      const session = {
-        isLoggedIn: true,
-        username: localUser.username,
-        role: localUser.role || 'admin',
-        expires: rememberMe 
-          ? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).getTime() 
-          : new Date(Date.now() + 2 * 60 * 60 * 1000).getTime()
-      };
-      saveJson(STORAGE_KEYS.AUTH, session);
-      return { success: true, mustChangePassword: localUser.mustChangePassword === true };
-    }
-
-    // 2. If not matched locally, try Supabase if configured and it's an email
-    if (isSupabaseConfigured && usernameOrEmail.includes('@')) {
+    if (isSupabaseConfigured) {
+      // SADECE Supabase girişi
       try {
         const { data, error } = await supabase.auth.signInWithPassword({
           email: usernameOrEmail.trim(),
@@ -99,11 +85,40 @@ export const authService = {
         console.error("Supabase Auth hatası:", err);
         throw err;
       }
-    }
+    } else {
+      // Supabase Yoksa SADECE Yerel Admin
+      const userStr = localStorage.getItem('tys_admin_user');
+      let localMatched = false;
+      let localUser = null;
 
-    // 3. Neither matched
-    recordFailedAttempt();
-    return { success: false };
+      if (userStr) {
+        localUser = JSON.parse(userStr);
+        const hashedInput = await hashPassword(password);
+        if (
+          usernameOrEmail.trim().toLowerCase() === localUser.username.toLowerCase() && 
+          hashedInput === localUser.passwordHash
+        ) {
+          localMatched = true;
+        }
+      }
+
+      if (localMatched) {
+        clearFailedAttempts();
+        const session = {
+          isLoggedIn: true,
+          username: localUser.username,
+          role: localUser.role || 'admin',
+          expires: rememberMe 
+            ? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).getTime() 
+            : new Date(Date.now() + 2 * 60 * 60 * 1000).getTime()
+        };
+        saveJson(STORAGE_KEYS.AUTH, session);
+        return { success: true, mustChangePassword: localUser.mustChangePassword === true };
+      }
+      
+      recordFailedAttempt();
+      return { success: false };
+    }
   },
   changeLocalPassword: async (newPassword) => {
     const userStr = localStorage.getItem('tys_admin_user');
