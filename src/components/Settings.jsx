@@ -108,8 +108,11 @@ export default function SettingsPage({ activePage }) {
   const handleResetData = () => {
     if (confirm('DİKKAT: Mevcut tüm telefon, müşteri, cari ve gider verileriniz silinecektir! Demo verilerine geri dönmek istediğinizden emin misiniz?')) {
       try {
-        localStorage.clear();
-        initDb(true);
+        // localStorage.clear() YAPMIYORUZ çünkü Supabase oturum (şifre) token'ını da siliyor.
+        // Şifre silinince de initDb() içindeki syncToCloud() "Kullanıcı giriş yapmamış" deyip buluttaki verileri SIFIRLAMIYOR!
+        localStorage.removeItem('tys_audit_log'); // Logları sil
+        initDb(true); // Tüm tabloları [] olarak ezip aynı anda buluta yollar
+        
         setSuccessMsg('Veriler sıfırlandı. Sayfa yenileniyor...');
         setTimeout(() => {
           window.location.reload();
