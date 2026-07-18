@@ -130,7 +130,7 @@ export default function App() {
         supabase.removeChannel(subscription);
       }
     };
-  }, []);
+  }, [isLoggedIn]);
 
   const handleLoginSuccess = () => {
     setIsLoggedIn(true);
