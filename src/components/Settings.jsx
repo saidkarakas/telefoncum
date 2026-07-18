@@ -105,18 +105,20 @@ export default function SettingsPage({ activePage }) {
   };
 
   // Reset to Demo Data
-  const handleResetData = () => {
+  const handleResetData = async () => {
     if (confirm('DİKKAT: Mevcut tüm telefon, müşteri, cari ve gider verileriniz silinecektir! Demo verilerine geri dönmek istediğinizden emin misiniz?')) {
       try {
         // localStorage.clear() YAPMIYORUZ çünkü Supabase oturum (şifre) token'ını da siliyor.
         // Şifre silinince de initDb() içindeki syncToCloud() "Kullanıcı giriş yapmamış" deyip buluttaki verileri SIFIRLAMIYOR!
         localStorage.removeItem('tys_audit_log'); // Logları sil
-        initDb(true); // Tüm tabloları [] olarak ezip aynı anda buluta yollar
+        
+        setSuccessMsg('Veriler sıfırlanıyor, lütfen bekleyin...');
+        await initDb(true); // Tüm tabloları [] olarak ezip buluta yollar ve bitmesini BEKLER!
         
         setSuccessMsg('Veriler sıfırlandı. Sayfa yenileniyor...');
         setTimeout(() => {
           window.location.reload();
-        }, 1200);
+        }, 500);
       } catch (e) {
         setErrorMsg('Sıfırlama hatası oluştu.');
       }

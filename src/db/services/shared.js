@@ -107,7 +107,7 @@ export const saveJson = (key, data) => {
   }
 
   localStorage.setItem(key, JSON.stringify(data));
-  syncToCloud(key, data);
+  return syncToCloud(key, data);
 };
 
 // Helper: Secure SHA-256 Password Hasher using native browser SubtleCrypto
@@ -142,7 +142,7 @@ export const calculatePhoneCosts = (phone) => {
 };
 
 // Initialize DB and seed demo data if empty
-export const initDb = (force = false) => {
+export const initDb = async (force = false) => {
   // 8. Auth session (default admin user: admin@telefoncum.com / 123456)
   const defaultAuth = {
     username: 'admin@telefoncum.com',
@@ -178,25 +178,24 @@ export const initDb = (force = false) => {
     currency: 'TL',
     theme: 'dark'
   };
-  saveJson(STORAGE_KEYS.SETTINGS, defaultSettings);
 
-  // 2. Customers
-  saveJson(STORAGE_KEYS.CUSTOMERS, []);
-
-  // 3. Suppliers
-  saveJson(STORAGE_KEYS.SUPPLIERS, []);
-
-  // 4. Phones
-  saveJson(STORAGE_KEYS.PHONES, []);
-
-  // 5. Expenses
-  saveJson(STORAGE_KEYS.EXPENSES, []);
-
-  // 6. Transactions
-  saveJson(STORAGE_KEYS.TRANSACTIONS, []);
-
-  // 7. Repairs
-  saveJson(STORAGE_KEYS.REPAIRS, []);
-
-  // Auth session has been migrated to the top of initDb to bypass inventory load checks.
+  if (force) {
+    await Promise.all([
+      saveJson(STORAGE_KEYS.SETTINGS, defaultSettings),
+      saveJson(STORAGE_KEYS.CUSTOMERS, []),
+      saveJson(STORAGE_KEYS.SUPPLIERS, []),
+      saveJson(STORAGE_KEYS.PHONES, []),
+      saveJson(STORAGE_KEYS.EXPENSES, []),
+      saveJson(STORAGE_KEYS.TRANSACTIONS, []),
+      saveJson(STORAGE_KEYS.REPAIRS, [])
+    ]);
+  } else {
+    saveJson(STORAGE_KEYS.SETTINGS, defaultSettings);
+    saveJson(STORAGE_KEYS.CUSTOMERS, []);
+    saveJson(STORAGE_KEYS.SUPPLIERS, []);
+    saveJson(STORAGE_KEYS.PHONES, []);
+    saveJson(STORAGE_KEYS.EXPENSES, []);
+    saveJson(STORAGE_KEYS.TRANSACTIONS, []);
+    saveJson(STORAGE_KEYS.REPAIRS, []);
+  }
 };
