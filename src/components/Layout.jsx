@@ -18,13 +18,27 @@ import {
 import { settingsService } from '../db/services/settingsService';
 import { STORAGE_KEYS, getJson } from '../db/services/shared';
 
-export default function Layout({ 
-  children, 
-  activePage, 
-  setActivePage, 
-  onLogout, 
-  globalSearchQuery, 
-  setGlobalSearchQuery 
+// Logomark: yükselen sinyal çubukları — hem "telefon sinyali" hem de
+// dükkanın rapor/grafik tarafına gönderme yapıyor. Tek harfli rozet yerine
+// markanın kendi diliyle konuşan bir imza.
+function SignalMark({ className = '' }) {
+  return (
+    <svg width="20" height="20" viewBox="0 0 20 20" className={className} fill="none">
+      <rect x="1" y="12" width="3.5" height="7" rx="1" className="fill-white/45" />
+      <rect x="6" y="8" width="3.5" height="11" rx="1" className="fill-white/70" />
+      <rect x="11" y="4" width="3.5" height="15" rx="1" className="fill-white" />
+      <rect x="16" y="0.5" width="3.5" height="18.5" rx="1" className="fill-white/90" />
+    </svg>
+  );
+}
+
+export default function Layout({
+  children,
+  activePage,
+  setActivePage,
+  onLogout,
+  globalSearchQuery,
+  setGlobalSearchQuery
 }) {
   const [theme, setTheme] = useState('dark');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -78,21 +92,21 @@ export default function Layout({
 
   return (
     <div className="min-h-screen flex bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 transition-colors duration-200">
-      
-      {/* 1. DESKTOP SIDEBAR */}
-      <aside className="hidden md:flex flex-col w-64 bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 shrink-0">
+
+      {/* 1. DESKTOP SIDEBAR — tema ne olursa olsun her zaman koyu zemin */}
+      <aside className="hidden md:flex flex-col w-64 bg-slate-900 border-r border-slate-800 shrink-0">
         {/* Logo */}
-        <div className="h-16 flex items-center gap-3 px-6 border-b border-slate-100 dark:border-slate-850">
-          <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center text-white font-bold shadow-md shadow-indigo-600/35">
-            T
+        <div className="h-16 flex items-center gap-3 px-6 border-b border-slate-800">
+          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-teal-400 to-teal-600 flex items-center justify-center shadow-md shadow-teal-600/25">
+            <SignalMark />
           </div>
-          <span className="font-bold text-base tracking-tight truncate">
+          <span className="font-display font-bold text-base tracking-tight truncate text-white">
             {settings.businessName}
           </span>
         </div>
 
         {/* Navigation Items */}
-        <nav className="flex-1 py-6 px-4 space-y-1 overflow-y-auto">
+        <nav className="flex-1 py-6 px-3 space-y-0.5 overflow-y-auto">
           {menuItems.map((item) => {
             const Icon = item.icon;
             const isActive = activePage === item.id;
@@ -100,13 +114,13 @@ export default function Layout({
               <button
                 key={item.id}
                 onClick={() => setActivePage(item.id)}
-                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold transition-all duration-150 cursor-pointer ${
+                className={`relative w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-semibold transition-all duration-150 cursor-pointer ${
                   isActive
-                    ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20'
-                    : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-slate-200'
+                    ? 'bg-teal-500 text-slate-900 shadow-md shadow-teal-500/20'
+                    : 'text-slate-400 hover:bg-white/5 hover:text-slate-100'
                 }`}
               >
-                <Icon size={18} />
+                <Icon size={17} strokeWidth={isActive ? 2.4 : 2} />
                 <span>{item.label}</span>
               </button>
             );
@@ -114,10 +128,10 @@ export default function Layout({
         </nav>
 
         {/* Sidebar Footer */}
-        <div className="p-4 border-t border-slate-100 dark:border-slate-800">
+        <div className="p-4 border-t border-slate-800">
           <button
             onClick={onLogout}
-            className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold text-red-500 hover:bg-red-50 dark:hover:bg-red-950/20 transition-all cursor-pointer"
+            className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold text-rose-400 hover:bg-rose-500/10 transition-all cursor-pointer"
           >
             <LogOut size={18} />
             <span>Çıkış Yap</span>
@@ -128,17 +142,17 @@ export default function Layout({
       {/* MOBILE MENU MODAL DRAWER */}
       {mobileMenuOpen && (
         <div className="fixed inset-0 z-50 flex md:hidden bg-slate-900/60 backdrop-blur-sm">
-          <div className="w-64 bg-white dark:bg-slate-900 h-full p-5 flex flex-col shadow-2xl animate-in slide-in-from-left duration-200">
+          <div className="w-64 bg-slate-900 h-full p-5 flex flex-col shadow-2xl animate-in slide-in-from-left duration-200">
             <div className="flex justify-between items-center mb-6">
-              <span className="font-bold truncate text-slate-800 dark:text-white">
+              <span className="font-display font-bold truncate text-white">
                 {settings.businessName}
               </span>
-              <button onClick={() => setMobileMenuOpen(false)} className="text-slate-500">
+              <button onClick={() => setMobileMenuOpen(false)} className="text-slate-400">
                 <X size={20} />
               </button>
             </div>
-            
-            <nav className="flex-1 space-y-1">
+
+            <nav className="flex-1 space-y-0.5">
               {menuItems.map((item) => {
                 const Icon = item.icon;
                 const isActive = activePage === item.id;
@@ -149,13 +163,13 @@ export default function Layout({
                       setActivePage(item.id);
                       setMobileMenuOpen(false);
                     }}
-                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold cursor-pointer ${
+                    className={`relative w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-semibold cursor-pointer ${
                       isActive
-                        ? 'bg-indigo-600 text-white'
-                        : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+                        ? 'bg-teal-500 text-slate-900'
+                        : 'text-slate-400 hover:bg-white/5 hover:text-slate-100'
                     }`}
                   >
-                    <Icon size={18} />
+                    <Icon size={17} />
                     <span>{item.label}</span>
                   </button>
                 );
@@ -164,7 +178,7 @@ export default function Layout({
 
             <button
               onClick={onLogout}
-              className="mt-auto w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold text-red-500 hover:bg-red-50 dark:hover:bg-red-950/20 cursor-pointer"
+              className="mt-auto w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold text-rose-400 hover:bg-rose-500/10 cursor-pointer"
             >
               <LogOut size={18} />
               <span>Çıkış Yap</span>
@@ -175,10 +189,10 @@ export default function Layout({
 
       {/* 2. MAIN CONTENT AREA */}
       <div className="flex-1 flex flex-col min-w-0 pb-20 md:pb-0">
-        
+
         {/* Top Header */}
         <header className="h-16 flex items-center justify-between px-4 md:px-6 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 z-10">
-          
+
           {/* Left Side: Mobile burger button & Page title */}
           <div className="flex items-center gap-3">
             <button
@@ -187,7 +201,7 @@ export default function Layout({
             >
               <Menu size={20} />
             </button>
-            <h1 className="text-lg font-bold text-slate-850 dark:text-white capitalize tracking-tight">
+            <h1 className="font-display text-lg font-bold text-slate-850 dark:text-white capitalize tracking-tight">
               {menuItems.find(item => item.id === activePage)?.label || 'Yönetim'}
             </h1>
           </div>
@@ -207,13 +221,13 @@ export default function Layout({
                 }
               }}
               placeholder="IMEI, Model, Müşteri, Seri No Ara..."
-              className="w-full pl-9 pr-4 py-1.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-xs text-slate-800 dark:text-white focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-transparent transition"
+              className="w-full pl-9 pr-4 py-1.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-xs font-mono text-slate-800 dark:text-white focus:outline-none focus:ring-1 focus:ring-teal-500 focus:border-transparent transition"
             />
           </div>
 
           {/* Right Side: Theme switcher & Logout */}
           <div className="flex items-center gap-2">
-            
+
             {/* Theme switcher (Modern Sliding Pill Switch) */}
             <button
               onClick={toggleTheme}
@@ -221,19 +235,19 @@ export default function Layout({
               title={theme === 'dark' ? 'Açık Temaya Geç' : 'Koyu Temaya Geç'}
             >
               {/* Slider Indicator */}
-              <div 
+              <div
                 className="absolute h-6 w-6 rounded-full bg-white dark:bg-slate-800 shadow-md border border-slate-200/50 dark:border-slate-700/50 transition-all duration-300 flex items-center justify-center"
                 style={{
                   transform: theme === 'dark' ? 'translateX(26px)' : 'translateX(2px)'
                 }}
               >
                 {theme === 'dark' ? (
-                  <Moon size={11} className="text-indigo-400 fill-indigo-400/20" />
+                  <Moon size={11} className="text-teal-400 fill-teal-400/20" />
                 ) : (
                   <Sun size={11} className="text-amber-500 fill-amber-500/20" />
                 )}
               </div>
-              
+
               {/* Icons in Background */}
               <div className="flex justify-between w-full px-2 pointer-events-none select-none">
                 <Sun size={10} className={`transition-opacity duration-300 ${theme === 'dark' ? 'text-slate-500 opacity-40' : 'opacity-0'}`} />
@@ -242,7 +256,7 @@ export default function Layout({
             </button>
 
             {/* Business Logo Indicator or User Initials */}
-            <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-indigo-500 to-teal-500 flex items-center justify-center text-white text-xs font-bold shadow-md shadow-indigo-500/10">
+            <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-teal-500 to-amber-400 flex items-center justify-center text-white text-xs font-bold shadow-md shadow-teal-500/10">
               <User size={16} />
             </div>
           </div>
@@ -264,7 +278,7 @@ export default function Layout({
                 }
               }}
               placeholder="IMEI, Model, Müşteri Ara..."
-              className="w-full pl-9 pr-4 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-xs text-slate-850 dark:text-white focus:outline-none"
+              className="w-full pl-9 pr-4 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-xs font-mono text-slate-850 dark:text-white focus:outline-none focus:ring-1 focus:ring-teal-500"
             />
           </div>
         </div>
@@ -284,10 +298,11 @@ export default function Layout({
             <button
               key={item.id}
               onClick={() => setActivePage(item.id)}
-              className={`flex flex-col items-center gap-1 text-slate-500 cursor-pointer ${
-                isActive ? 'text-indigo-600 dark:text-indigo-400' : 'text-slate-400'
+              className={`relative flex flex-col items-center gap-1 cursor-pointer ${
+                isActive ? 'text-teal-600 dark:text-teal-400' : 'text-slate-400'
               }`}
             >
+              {isActive && <span className="absolute -top-2 h-1 w-1 rounded-full bg-teal-500" />}
               <Icon size={18} />
               <span className="text-[10px] font-semibold">{item.label}</span>
             </button>
@@ -296,8 +311,8 @@ export default function Layout({
         {/* Logout as a smaller navigation item on mobile settings, or settings button */}
         <button
           onClick={() => setActivePage('settings')}
-          className={`flex flex-col items-center gap-1 text-slate-500 cursor-pointer ${
-            activePage === 'settings' ? 'text-indigo-600 dark:text-indigo-400' : 'text-slate-400'
+          className={`relative flex flex-col items-center gap-1 cursor-pointer ${
+            activePage === 'settings' ? 'text-teal-600 dark:text-teal-400' : 'text-slate-400'
           }`}
         >
           <Settings size={18} />

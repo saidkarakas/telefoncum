@@ -1,18 +1,40 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  Smartphone, 
-  DollarSign, 
-  TrendingUp, 
-  ShoppingCart, 
-  CheckCircle2, 
-  Wrench, 
-  Clock, 
-  Calendar, 
-  ChevronRight,
+import {
+  Smartphone,
+  ShoppingCart,
+  CheckCircle2,
+  TrendingUp,
   TrendingDown,
+  Wrench,
+  Clock,
+  ChevronRight,
   PhoneCall
 } from 'lucide-react';
 import { reportService } from '../db/services/reportService';
+
+// Signature element: stoktaki cihazın "yaşını" gerçek bir pil göstergesi gibi
+// çizer. 0 gün = dolu/yeşil, 60+ gün = boş/kırmızı. Süs değil, veri taşıyor.
+function BatteryLevel({ days }) {
+  const pct = Math.max(4, Math.min(100, 100 - (days / 60) * 100));
+  const tone =
+    pct > 60 ? 'stroke-teal-500 fill-teal-500 dark:fill-teal-400 dark:stroke-teal-400'
+    : pct > 30 ? 'stroke-amber-500 fill-amber-500 dark:fill-amber-400 dark:stroke-amber-400'
+    : 'stroke-rose-500 fill-rose-500 dark:fill-rose-450 dark:stroke-rose-450';
+
+  return (
+    <span className="inline-flex items-center gap-1.5" title={`${days} gündür stokta`}>
+      <svg width="26" height="13" viewBox="0 0 26 13" className="shrink-0">
+        <rect x="0.5" y="0.5" width="21" height="12" rx="2.5"
+          className="fill-none stroke-slate-300 dark:stroke-slate-600" strokeWidth="1" />
+        <rect x="22" y="4" width="2.5" height="5" rx="1"
+          className="fill-slate-300 dark:fill-slate-600" />
+        <rect x="2" y="2" width={Math.max(1.5, 18 * pct / 100)} height="9" rx="1.5"
+          className={tone.split(' ').filter(c => c.startsWith('fill')).join(' ')} />
+      </svg>
+      <span className="font-mono text-[11px] tabular-nums text-slate-500 dark:text-slate-400">{days}g</span>
+    </span>
+  );
+}
 
 export default function Dashboard({ setActivePage, setSelectedPhoneId, setOpenPhoneDetail }) {
   const [data, setData] = useState(null);
@@ -67,79 +89,20 @@ export default function Dashboard({ setActivePage, setSelectedPhoneId, setOpenPh
 
   if (!data) return (
     <div className="flex justify-center items-center h-64">
-      <div className="animate-spin rounded-full h-8 w-8 border-2 border-indigo-600 border-t-transparent"></div>
+      <div className="animate-spin rounded-full h-8 w-8 border-2 border-teal-600 border-t-transparent"></div>
     </div>
   );
 
   const { cards, lists } = data;
+  const netProfitPositive = cards.totalProfit >= 0;
+  const today = new Date().toLocaleDateString('tr-TR', { weekday: 'long', day: 'numeric', month: 'long' });
 
-  const cardItems = [
-    {
-      title: 'Stoktaki Telefonlar',
-      value: cards.stockCount,
-      desc: 'Aktif Satışta & Stokta',
-      icon: Smartphone,
-      color: 'from-blue-500/10 to-indigo-500/10 text-blue-600 dark:text-blue-400 border-blue-100 dark:border-blue-900/50',
-      action: 'phones'
-    },
-    {
-      title: 'Toplam Stok Maliyeti',
-      value: `${cards.totalStockCost.toLocaleString('tr-TR')} TL`,
-      desc: 'Alış + Yapılan Masraflar',
-      icon: DollarSign,
-      color: 'from-amber-500/10 to-orange-500/10 text-amber-600 dark:text-amber-400 border-amber-100 dark:border-amber-900/50',
-      action: 'phones'
-    },
-    {
-      title: 'Toplam Satış Tutarı',
-      value: `${cards.totalSalesAmount.toLocaleString('tr-TR')} TL`,
-      desc: 'Satılan Cihazların Ciro Toplamı',
-      icon: CheckCircle2,
-      color: 'from-emerald-500/10 to-teal-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-100 dark:border-emerald-900/50',
-      action: 'reports'
-    },
-    {
-      title: 'Toplam Net Kar',
-      value: `${cards.totalProfit.toLocaleString('tr-TR')} TL`,
-      desc: 'Satış Fiyatı - Maliyet',
-      icon: TrendingUp,
-      color: cards.totalProfit >= 0 
-        ? 'from-indigo-500/10 to-purple-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-100 dark:border-indigo-900/50'
-        : 'from-red-500/10 to-rose-500/10 text-red-600 dark:text-red-400 border-red-100 dark:border-red-900/50',
-      action: 'reports'
-    },
-    {
-      title: 'Bugün Alınan',
-      value: cards.boughtToday,
-      desc: 'Bugün Eklenen Cihazlar',
-      icon: ShoppingCart,
-      color: 'from-sky-500/10 to-cyan-500/10 text-sky-600 dark:text-sky-400 border-sky-100 dark:border-sky-900/50',
-      action: 'phones'
-    },
-    {
-      title: 'Bugün Satılan',
-      value: cards.soldToday,
-      desc: 'Bugün Çıkışı Yapılanlar',
-      icon: Calendar,
-      color: 'from-green-500/10 to-emerald-500/10 text-green-600 dark:text-green-400 border-green-100 dark:border-green-900/50',
-      action: 'phones'
-    },
-    {
-      title: 'Tamirdeki Telefon',
-      value: cards.inRepair,
-      desc: 'Serviste İşlem Görenler',
-      icon: Wrench,
-      color: 'from-violet-500/10 to-fuchsia-500/10 text-violet-600 dark:text-violet-400 border-violet-100 dark:border-violet-900/50',
-      action: 'repairs'
-    },
-    {
-      title: 'Bekleyen Telefon',
-      value: cards.pendingRepairs,
-      desc: 'Kabul Sırasında Bekleyen',
-      icon: Clock,
-      color: 'from-rose-500/10 to-red-500/10 text-rose-600 dark:text-rose-400 border-rose-100 dark:border-rose-900/50',
-      action: 'repairs'
-    }
+  const railStats = [
+    { label: 'Stokta', value: cards.stockCount, icon: Smartphone, page: 'phones' },
+    { label: 'Bugün Alınan', value: cards.boughtToday, icon: ShoppingCart, page: 'phones' },
+    { label: 'Bugün Satılan', value: cards.soldToday, icon: CheckCircle2, page: 'phones' },
+    { label: 'Tamirde', value: cards.inRepair, icon: Wrench, page: 'repairs' },
+    { label: 'Bekleyen', value: cards.pendingRepairs, icon: Clock, page: 'repairs' },
   ];
 
   const handleViewDetail = (phoneId) => {
@@ -150,7 +113,7 @@ export default function Dashboard({ setActivePage, setSelectedPhoneId, setOpenPh
   const getStatusBadge = (status) => {
     const styles = {
       'Stokta': 'bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-450 border-blue-200 dark:border-blue-900/40',
-      'Satışta': 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-450 border-emerald-200 dark:border-emerald-900/40',
+      'Satışta': 'bg-teal-50 text-teal-700 dark:bg-teal-950/40 dark:text-teal-450 border-teal-200 dark:border-teal-900/40',
       'Tamirde': 'bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-450 border-amber-200 dark:border-amber-900/40',
       'Rezerve': 'bg-purple-50 text-purple-700 dark:bg-purple-950/40 dark:text-purple-450 border-purple-200 dark:border-purple-900/40',
       'Satıldı': 'bg-slate-100 text-slate-700 dark:bg-slate-800/40 dark:text-slate-400 border-slate-200 dark:border-slate-800'
@@ -164,55 +127,82 @@ export default function Dashboard({ setActivePage, setSelectedPhoneId, setOpenPh
 
   return (
     <div className="space-y-6">
-      
-      {/* 8 SUMMARY CARDS */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {cardItems.map((item, idx) => {
-          const Icon = item.icon;
-          return (
-            <div 
-              key={idx}
-              onClick={() => item.action && setActivePage(item.action)}
-              className={`p-4 rounded-2xl bg-gradient-to-br ${item.color} border flex flex-col justify-between shadow-sm transition-all hover:scale-[1.01] ${item.action ? 'cursor-pointer' : ''}`}
-            >
-              <div className="flex justify-between items-start">
-                <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 block tracking-wide truncate max-w-[80%]">
-                  {item.title}
-                </span>
-                <span className="p-1.5 rounded-lg bg-white/80 dark:bg-slate-900/50 shadow-sm">
-                  <Icon size={16} />
-                </span>
-              </div>
-              <div className="mt-3">
-                <span className="text-xl md:text-2xl font-bold tracking-tight block text-slate-900 dark:text-white">
-                  {item.value}
-                </span>
-                <span className="text-[10px] text-slate-500 dark:text-slate-450 block mt-0.5">
-                  {item.desc}
-                </span>
-              </div>
+
+      {/* ENSTRÜMAN PANELİ — dolu renkli hero blok + koyu istatistik rayı */}
+      <div className="rounded-2xl overflow-hidden shadow-lg shadow-slate-900/5 dark:shadow-black/20">
+        <div className="flex flex-col lg:flex-row lg:items-stretch bg-slate-900">
+
+          {/* Net kâr — dolu gradyan blok */}
+          <div
+            onClick={() => setActivePage('reports')}
+            className="relative px-6 py-5 lg:w-[320px] overflow-hidden cursor-pointer bg-gradient-to-br from-teal-500 via-teal-600 to-slate-900"
+          >
+            <div className="absolute -right-6 -bottom-8 w-32 h-32 rounded-full bg-white/10 blur-xl" />
+            <div className="relative flex items-center gap-2 text-[11px] font-semibold uppercase tracking-widest text-teal-50/80">
+              <span className="relative flex h-1.5 w-1.5">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-white"></span>
+              </span>
+              Canlı Panel · {today}
             </div>
-          );
-        })}
+            <span className="relative block mt-3 text-xs font-semibold text-teal-50/70 uppercase tracking-wide">
+              Toplam Net Kâr
+            </span>
+            <div className={`relative mt-1 flex items-baseline gap-1.5 font-display text-4xl font-bold tracking-tight text-white`}>
+              {netProfitPositive ? '+' : ''}{cards.totalProfit.toLocaleString('tr-TR')}
+              <span className="text-base font-semibold text-teal-50/70">TL</span>
+            </div>
+            <div className="relative mt-1.5 flex items-center gap-1 text-[11px] font-medium text-teal-50/80">
+              {netProfitPositive ? <TrendingUp size={13} className="shrink-0" /> : <TrendingDown size={13} className="shrink-0" />}
+              <span className="font-mono">{cards.totalSalesAmount.toLocaleString('tr-TR')} TL</span> ciro ·{' '}
+              <span className="font-mono">{cards.totalStockCost.toLocaleString('tr-TR')} TL</span> maliyet
+            </div>
+          </div>
+
+          {/* İstatistik rayı — koyu zemin, renkli ikon çipleri */}
+          <div className="flex-1 grid grid-cols-2 sm:grid-cols-5 divide-x divide-y sm:divide-y-0 divide-white/5">
+            {railStats.map((s, i) => {
+              const Icon = s.icon;
+              const chipTones = ['bg-teal-500/15 text-teal-400', 'bg-amber-500/15 text-amber-400', 'bg-sky-500/15 text-sky-400', 'bg-violet-500/15 text-violet-400', 'bg-rose-500/15 text-rose-400'];
+              return (
+                <button
+                  key={i}
+                  onClick={() => setActivePage(s.page)}
+                  className="flex flex-col items-start gap-2 p-4 text-left hover:bg-white/5 transition-colors cursor-pointer"
+                >
+                  <span className={`p-1.5 rounded-lg ${chipTones[i % chipTones.length]}`}>
+                    <Icon size={14} />
+                  </span>
+                  <span className="font-mono text-xl font-semibold tabular-nums text-white">
+                    {s.value}
+                  </span>
+                  <span className="text-[10.5px] text-slate-400 leading-tight">
+                    {s.label}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
       </div>
 
-      {/* DASHBOARD LISTS */}
+      {/* LİSTELER */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        
+
         {/* Son Eklenen Telefonlar */}
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm">
           <div className="flex justify-between items-center mb-4">
             <h3 className="font-bold text-sm text-slate-800 dark:text-white uppercase tracking-wider">
               Son Eklenen Telefonlar
             </h3>
-            <button 
-              onClick={() => setActivePage('phones')} 
-              className="text-xs font-semibold text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 flex items-center gap-0.5 cursor-pointer"
+            <button
+              onClick={() => setActivePage('phones')}
+              className="text-xs font-semibold text-teal-600 hover:text-teal-700 dark:text-teal-400 flex items-center gap-0.5 cursor-pointer"
             >
               Tümünü Gör <ChevronRight size={14} />
             </button>
           </div>
-          
+
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs border-collapse">
               <thead>
@@ -230,16 +220,16 @@ export default function Dashboard({ setActivePage, setSelectedPhoneId, setOpenPh
                   </tr>
                 ) : (
                   lists.recentAdded.map(phone => (
-                    <tr 
-                      key={phone.id} 
+                    <tr
+                      key={phone.id}
                       onClick={() => handleViewDetail(phone.id)}
                       className="hover:bg-slate-50 dark:hover:bg-slate-850/50 cursor-pointer transition-colors"
                     >
                       <td className="py-3 font-medium text-slate-800 dark:text-slate-250">
                         {phone.brand} {phone.model} <span className="text-[10px] text-slate-400">({phone.storage})</span>
                       </td>
-                      <td className="py-3 text-slate-500">{new Date(phone.purchaseDate).toLocaleDateString('tr-TR')}</td>
-                      <td className="py-3 text-right font-semibold text-slate-800 dark:text-slate-200">
+                      <td className="py-3 font-mono text-slate-500">{new Date(phone.purchaseDate).toLocaleDateString('tr-TR')}</td>
+                      <td className="py-3 text-right font-mono font-semibold text-slate-800 dark:text-slate-200">
                         {phone.totalCost.toLocaleString('tr-TR')} TL
                       </td>
                       <td className="py-3 text-center">{getStatusBadge(phone.status)}</td>
@@ -257,14 +247,14 @@ export default function Dashboard({ setActivePage, setSelectedPhoneId, setOpenPh
             <h3 className="font-bold text-sm text-slate-800 dark:text-white uppercase tracking-wider">
               Son Satılan Telefonlar
             </h3>
-            <button 
-              onClick={() => setActivePage('phones')} 
-              className="text-xs font-semibold text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 flex items-center gap-0.5 cursor-pointer"
+            <button
+              onClick={() => setActivePage('phones')}
+              className="text-xs font-semibold text-teal-600 hover:text-teal-700 dark:text-teal-400 flex items-center gap-0.5 cursor-pointer"
             >
               Arşive Git <ChevronRight size={14} />
             </button>
           </div>
-          
+
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs border-collapse">
               <thead>
@@ -282,7 +272,7 @@ export default function Dashboard({ setActivePage, setSelectedPhoneId, setOpenPh
                   </tr>
                 ) : (
                   lists.recentSold.map(phone => (
-                    <tr 
+                    <tr
                       key={phone.id}
                       onClick={() => handleViewDetail(phone.id)}
                       className="hover:bg-slate-50 dark:hover:bg-slate-850/50 cursor-pointer transition-colors"
@@ -290,11 +280,11 @@ export default function Dashboard({ setActivePage, setSelectedPhoneId, setOpenPh
                       <td className="py-3 font-medium text-slate-800 dark:text-slate-250">
                         {phone.brand} {phone.model} <span className="text-[10px] text-slate-400">({phone.storage})</span>
                       </td>
-                      <td className="py-3 text-slate-500">{new Date(phone.salesDate).toLocaleDateString('tr-TR')}</td>
-                      <td className="py-3 text-right font-semibold text-slate-800 dark:text-slate-200">
+                      <td className="py-3 font-mono text-slate-500">{new Date(phone.salesDate).toLocaleDateString('tr-TR')}</td>
+                      <td className="py-3 text-right font-mono font-semibold text-slate-800 dark:text-slate-200">
                         {phone.salesPrice.toLocaleString('tr-TR')} TL
                       </td>
-                      <td className={`py-3 text-right font-bold ${phone.profit >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>
+                      <td className={`py-3 text-right font-mono font-bold ${phone.profit >= 0 ? 'text-teal-500' : 'text-rose-500'}`}>
                         {phone.profit >= 0 ? '+' : ''}{phone.profit.toLocaleString('tr-TR')} TL
                       </td>
                     </tr>
@@ -305,28 +295,30 @@ export default function Dashboard({ setActivePage, setSelectedPhoneId, setOpenPh
           </div>
         </div>
 
-        {/* Uzun Süredir Stokta Bekleyen Telefonlar */}
+        {/* Uzun Süredir Stokta Bekleyen Telefonlar — pil göstergeli stok sağlığı */}
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm lg:col-span-2">
           <div className="flex justify-between items-center mb-4">
             <h3 className="font-bold text-sm text-slate-800 dark:text-white uppercase tracking-wider flex items-center gap-1.5">
-              <span>Uzun Süredir Stokta Bekleyen Cihazlar</span>
-              <span className="bg-rose-100 text-rose-800 dark:bg-rose-950/40 dark:text-rose-450 px-1.5 py-0.5 rounded text-[10px] uppercase font-bold animate-pulse">Kritik</span>
+              <span>Stok Sağlığı</span>
+              <span className="bg-rose-100 text-rose-800 dark:bg-rose-950/40 dark:text-rose-450 px-1.5 py-0.5 rounded text-[10px] uppercase font-bold">
+                {lists.longWaiting.length} Kritik
+              </span>
             </h3>
-            <button 
-              onClick={() => setActivePage('phones')} 
-              className="text-xs font-semibold text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 flex items-center gap-0.5 cursor-pointer"
+            <button
+              onClick={() => setActivePage('phones')}
+              className="text-xs font-semibold text-teal-600 hover:text-teal-700 dark:text-teal-400 flex items-center gap-0.5 cursor-pointer"
             >
               Stok Listesi <ChevronRight size={14} />
             </button>
           </div>
-          
+
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs border-collapse">
               <thead>
                 <tr className="border-b border-slate-100 dark:border-slate-800 text-slate-450 uppercase font-semibold">
                   <th className="py-2.5 pb-2">Model</th>
                   <th className="py-2.5 pb-2">Alış Tarihi</th>
-                  <th className="py-2.5 pb-2 text-center">Bekleme Süresi</th>
+                  <th className="py-2.5 pb-2">Pil Durumu (Stok Yaşı)</th>
                   <th className="py-2.5 pb-2 text-right">Alış Fiyatı</th>
                   <th className="py-2.5 pb-2 text-right">Toplam Maliyet</th>
                   <th className="py-2.5 pb-2 text-center">Durum</th>
@@ -339,7 +331,7 @@ export default function Dashboard({ setActivePage, setSelectedPhoneId, setOpenPh
                   </tr>
                 ) : (
                   lists.longWaiting.map(phone => (
-                    <tr 
+                    <tr
                       key={phone.id}
                       onClick={() => handleViewDetail(phone.id)}
                       className="hover:bg-slate-50 dark:hover:bg-slate-850/50 cursor-pointer transition-colors"
@@ -347,16 +339,14 @@ export default function Dashboard({ setActivePage, setSelectedPhoneId, setOpenPh
                       <td className="py-3 font-medium text-slate-800 dark:text-slate-250">
                         {phone.brand} {phone.model} <span className="text-[10px] text-slate-400">({phone.storage} / {phone.color})</span>
                       </td>
-                      <td className="py-3 text-slate-500">{new Date(phone.purchaseDate).toLocaleDateString('tr-TR')}</td>
-                      <td className="py-3 text-center">
-                        <span className={`px-2 py-0.5 rounded font-semibold ${phone.daysInStock > 30 ? 'bg-red-50 text-red-700 dark:bg-red-950/20 dark:text-red-400' : 'bg-amber-50 text-amber-700 dark:bg-amber-950/20 dark:text-amber-400'}`}>
-                          {phone.daysInStock} Gün
-                        </span>
+                      <td className="py-3 font-mono text-slate-500">{new Date(phone.purchaseDate).toLocaleDateString('tr-TR')}</td>
+                      <td className="py-3">
+                        <BatteryLevel days={phone.daysInStock} />
                       </td>
-                      <td className="py-3 text-right font-semibold text-slate-700 dark:text-slate-300">
+                      <td className="py-3 text-right font-mono font-semibold text-slate-700 dark:text-slate-300">
                         {phone.purchasePrice.toLocaleString('tr-TR')} TL
                       </td>
-                      <td className="py-3 text-right font-bold text-slate-850 dark:text-white">
+                      <td className="py-3 text-right font-mono font-bold text-slate-850 dark:text-white">
                         {phone.totalCost.toLocaleString('tr-TR')} TL
                       </td>
                       <td className="py-3 text-center">{getStatusBadge(phone.status)}</td>
@@ -370,15 +360,15 @@ export default function Dashboard({ setActivePage, setSelectedPhoneId, setOpenPh
 
         {/* 1 Yıl Önce Satılanlar / Yenileme Teklifi Botu */}
         {lists.upsellCandidates && lists.upsellCandidates.length > 0 && (
-          <div className="bg-white dark:bg-slate-900 border border-blue-200 dark:border-blue-900/50 rounded-2xl p-5 shadow-sm lg:col-span-2">
+          <div className="bg-white dark:bg-slate-900 border border-teal-200 dark:border-teal-900/50 rounded-2xl p-5 shadow-sm lg:col-span-2">
             <div className="flex justify-between items-center mb-4">
-              <h3 className="font-bold text-sm text-blue-800 dark:text-blue-400 uppercase tracking-wider flex items-center gap-1.5">
+              <h3 className="font-bold text-sm text-teal-800 dark:text-teal-400 uppercase tracking-wider flex items-center gap-1.5">
                 <PhoneCall size={16} />
                 <span>Yenileme Teklifi Fırsatları (1 Yıl Önce Satılanlar)</span>
-                <span className="bg-blue-100 text-blue-800 dark:bg-blue-950/40 dark:text-blue-450 px-1.5 py-0.5 rounded text-[10px] uppercase font-bold">Bot</span>
+                <span className="bg-teal-100 text-teal-800 dark:bg-teal-950/40 dark:text-teal-450 px-1.5 py-0.5 rounded text-[10px] uppercase font-bold">Bot</span>
               </h3>
             </div>
-            
+
             <p className="text-[11px] text-slate-500 mb-4">
               Aşağıdaki cihazlar yaklaşık 1 yıl önce satıldı. Müşterilere ulaşıp cihazlarını yenilemek veya kılıf/ekran koruyucu gibi aksesuarlar satmak için harika bir fırsat!
             </p>
@@ -386,28 +376,28 @@ export default function Dashboard({ setActivePage, setSelectedPhoneId, setOpenPh
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs border-collapse">
                 <thead>
-                  <tr className="border-b border-blue-100 dark:border-blue-900/30 text-blue-600 dark:text-blue-500 uppercase font-semibold">
+                  <tr className="border-b border-teal-100 dark:border-teal-900/30 text-teal-600 dark:text-teal-500 uppercase font-semibold">
                     <th className="py-2.5 pb-2">Model</th>
                     <th className="py-2.5 pb-2">Satış Tarihi</th>
                     <th className="py-2.5 pb-2">Geçen Süre</th>
                     <th className="py-2.5 pb-2 text-right">Müşteri Numarası</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-blue-50 dark:divide-blue-900/20">
+                <tbody className="divide-y divide-teal-50 dark:divide-teal-900/20">
                   {lists.upsellCandidates.map(phone => {
                     const daysAgo = Math.floor((new Date().getTime() - new Date(phone.salesDate).getTime()) / (1000 * 3600 * 24));
                     return (
-                      <tr 
+                      <tr
                         key={phone.id}
                         onClick={() => handleViewDetail(phone.id)}
-                        className="hover:bg-blue-50/50 dark:hover:bg-blue-950/20 cursor-pointer transition-colors"
+                        className="hover:bg-teal-50/50 dark:hover:bg-teal-950/20 cursor-pointer transition-colors"
                       >
                         <td className="py-3 font-medium text-slate-800 dark:text-slate-250">
                           {phone.brand} {phone.model} <span className="text-[10px] text-slate-400">({phone.storage})</span>
                         </td>
-                        <td className="py-3 text-slate-500">{new Date(phone.salesDate).toLocaleDateString('tr-TR')}</td>
-                        <td className="py-3 font-semibold text-blue-700 dark:text-blue-400">{daysAgo} Gün</td>
-                        <td className="py-3 text-right font-medium text-slate-600 dark:text-slate-400">
+                        <td className="py-3 font-mono text-slate-500">{new Date(phone.salesDate).toLocaleDateString('tr-TR')}</td>
+                        <td className="py-3 font-semibold text-teal-700 dark:text-teal-400">{daysAgo} Gün</td>
+                        <td className="py-3 text-right font-mono font-medium text-slate-600 dark:text-slate-400">
                           {phone.customerPhone || 'Kayıtlı Değil'}
                         </td>
                       </tr>
