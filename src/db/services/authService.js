@@ -138,7 +138,8 @@ export const authService = {
         console.error("Supabase çıkış hatası:", err);
       }
     }
-    localStorage.removeItem(STORAGE_KEYS.AUTH);
+    // Güvenlik için: Çıkış yapıldığında telefondaki/bilgisayardaki TÜM verileri (önbelleği) sil!
+    localStorage.clear();
   },
   
   checkSession: () => {
