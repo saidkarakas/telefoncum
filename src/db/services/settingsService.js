@@ -43,6 +43,29 @@ export const settingsService = {
   },
 
   importDatabase: (jsonString) => {
+    const sanitizeObj = (obj, depth = 0) => {
+      if (depth > 10) throw new Error("Obje derinliği çok yüksek.");
+      if (obj === null || typeof obj !== 'object') {
+        if (typeof obj === 'string' && obj.length > 500000) throw new Error("Çok uzun metin.");
+        return obj;
+      }
+      
+      if (Array.isArray(obj)) {
+        if (obj.length > 10000) throw new Error("Dizi çok büyük.");
+        return obj.map(item => sanitizeObj(item, depth + 1));
+      }
+      
+      const cleanObj = {};
+      const keys = Object.keys(obj);
+      if (keys.length > 200) throw new Error("Çok fazla obje özelliği.");
+      
+      for (const k of keys) {
+        if (k === '__proto__' || k === 'constructor' || k === 'prototype') continue;
+        cleanObj[k] = sanitizeObj(obj[k], depth + 1);
+      }
+      return cleanObj;
+    };
+
     try {
       const db = JSON.parse(jsonString);
       if (!db || typeof db !== 'object' || Array.isArray(db)) {
@@ -59,13 +82,14 @@ export const settingsService = {
         
         if (validKeys.includes(key) && db[key]) {
            try {
-             const parsed = JSON.parse(db[key]); // Sadece geçerli JSON ise hata atmaz
-             if (Array.isArray(parsed) && parsed.length > 50000) {
+             const parsed = JSON.parse(db[key]);
+             if (Array.isArray(parsed) && parsed.length > 10000) {
                  throw new Error(`Kayıt sayısı çok yüksek: ${key}`);
              }
-             dataToSave[key] = db[key];
+             const sanitized = sanitizeObj(parsed);
+             dataToSave[key] = JSON.stringify(sanitized);
            } catch (err) {
-             throw new Error(`'${key}' verisi bozuk veya geçersiz formatta.`);
+             throw new Error(`'${key}' verisi bozuk veya geçersiz formatta: ` + err.message);
            }
         }
       }

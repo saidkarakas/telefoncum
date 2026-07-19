@@ -81,6 +81,12 @@ export default function SettingsPage({ activePage }) {
     const file = e.target.files[0];
     if (!file) return;
 
+    if (file.size > 5 * 1024 * 1024) { // 5MB limit
+      setErrorMsg('Yedek dosyası boyutu çok büyük (Maksimum 5 MB).');
+      e.target.value = '';
+      return;
+    }
+
     const userConfirm = confirm("⚠️ UYARI: Yedek yükleme işlemi mevcut tüm verilerinizi (telefon stokları, tamir kayıtları, kasa hareketleri vb.) tamamen silecektir ve geri alınamaz. Devam etmek istediğinizden emin misiniz?");
     if (!userConfirm) {
       e.target.value = '';
