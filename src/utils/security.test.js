@@ -35,13 +35,18 @@ describe('Settings Service Backup/Import Security', () => {
     expect(() => settingsService.importDatabase('[]')).toThrow();
   });
 
-  it('should prevent prototype pollution', () => {
-    const maliciousPayload = JSON.stringify({
-      "__proto__": { "polluted": true },
-      "tys_settings": "{}"
-    });
+  it('should prevent prototype pollution and throw error', () => {
+    const maliciousPayload = '{"__proto__": {"polluted": true}, "tys_settings": "{}"}';
     
-    settingsService.importDatabase(maliciousPayload);
+    expect(() => settingsService.importDatabase(maliciousPayload)).toThrow(/Prototype Pollution denemesi engellendi/);
     expect({}.polluted).toBeUndefined();
+  });
+
+  it('should scrub device passwords from repairs during export', () => {
+    localStorage.setItem('tys_repairs', JSON.stringify([{ id: 'rep-1', devicePassword: 'secret123' }]));
+    const exportedJson = settingsService.exportDatabase();
+    const parsed = JSON.parse(exportedJson);
+    expect(parsed.tys_repairs).toContain('[GİZLENDİ]');
+    expect(parsed.tys_repairs).not.toContain('secret123');
   });
 });

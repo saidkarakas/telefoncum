@@ -12,6 +12,14 @@ export const STORAGE_KEYS = {
   AUDIT_LOG: 'tys_audit_log'
 };
 
+export const SECURITY_LIMITS = {
+  MAX_BACKUP_SIZE_BYTES: 5 * 1024 * 1024,
+  MAX_OBJECT_DEPTH: 10,
+  MAX_ARRAY_LENGTH: 10000,
+  MAX_STRING_LENGTH: 500000,
+  MAX_OBJECT_KEYS: 200
+};
+
 // Helper: Get item from LocalStorage
 export const getJson = (key, defaultValue = []) => {
   const data = localStorage.getItem(key);

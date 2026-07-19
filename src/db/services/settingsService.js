@@ -1,4 +1,4 @@
-import { STORAGE_KEYS, getJson, saveJson } from './shared';
+import { STORAGE_KEYS, getJson, saveJson, SECURITY_LIMITS } from './shared';
 
 export const settingsService = {
   get: () => {
@@ -44,23 +44,25 @@ export const settingsService = {
 
   importDatabase: (jsonString) => {
     const sanitizeObj = (obj, depth = 0) => {
-      if (depth > 10) throw new Error("Obje derinliği çok yüksek.");
+      if (depth > SECURITY_LIMITS.MAX_OBJECT_DEPTH) throw new Error("Obje derinliği çok yüksek.");
       if (obj === null || typeof obj !== 'object') {
-        if (typeof obj === 'string' && obj.length > 500000) throw new Error("Çok uzun metin.");
+        if (typeof obj === 'string' && obj.length > SECURITY_LIMITS.MAX_STRING_LENGTH) throw new Error("Çok uzun metin.");
         return obj;
       }
       
       if (Array.isArray(obj)) {
-        if (obj.length > 10000) throw new Error("Dizi çok büyük.");
+        if (obj.length > SECURITY_LIMITS.MAX_ARRAY_LENGTH) throw new Error("Dizi çok büyük.");
         return obj.map(item => sanitizeObj(item, depth + 1));
       }
       
       const cleanObj = {};
       const keys = Object.keys(obj);
-      if (keys.length > 200) throw new Error("Çok fazla obje özelliği.");
+      if (keys.length > SECURITY_LIMITS.MAX_OBJECT_KEYS) throw new Error("Çok fazla obje özelliği.");
       
       for (const k of keys) {
-        if (k === '__proto__' || k === 'constructor' || k === 'prototype') continue;
+        if (k === '__proto__' || k === 'constructor' || k === 'prototype') {
+           throw new Error("Güvenlik İhlali: Prototype Pollution denemesi engellendi.");
+        }
         cleanObj[k] = sanitizeObj(obj[k], depth + 1);
       }
       return cleanObj;
@@ -77,13 +79,15 @@ export const settingsService = {
       const dataToSave = {};
 
       for (const key of Object.keys(db)) {
-        if (key === '__proto__' || key === 'constructor' || key === 'prototype') continue;
+        if (key === '__proto__' || key === 'constructor' || key === 'prototype') {
+          throw new Error("Güvenlik İhlali: Prototype Pollution denemesi engellendi.");
+        }
         if (key === '_version') continue;
         
         if (validKeys.includes(key) && db[key]) {
            try {
              const parsed = JSON.parse(db[key]);
-             if (Array.isArray(parsed) && parsed.length > 10000) {
+             if (Array.isArray(parsed) && parsed.length > SECURITY_LIMITS.MAX_ARRAY_LENGTH) {
                  throw new Error(`Kayıt sayısı çok yüksek: ${key}`);
              }
              const sanitized = sanitizeObj(parsed);

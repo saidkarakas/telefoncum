@@ -12,7 +12,7 @@ import {
   Lock
 } from 'lucide-react';
 import { settingsService } from '../db/services/settingsService';
-import { initDb } from '../db/services/shared';
+import { initDb, SECURITY_LIMITS } from '../db/services/shared';
 
 export default function SettingsPage({ activePage }) {
   const [settings, setSettings] = useState({
@@ -81,8 +81,8 @@ export default function SettingsPage({ activePage }) {
     const file = e.target.files[0];
     if (!file) return;
 
-    if (file.size > 5 * 1024 * 1024) { // 5MB limit
-      setErrorMsg('Yedek dosyası boyutu çok büyük (Maksimum 5 MB).');
+    if (file.size > SECURITY_LIMITS.MAX_BACKUP_SIZE_BYTES) {
+      setErrorMsg(`Yedek dosyası boyutu çok büyük (Maksimum ${SECURITY_LIMITS.MAX_BACKUP_SIZE_BYTES / (1024*1024)} MB).`);
       e.target.value = '';
       return;
     }
