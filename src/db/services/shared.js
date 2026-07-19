@@ -45,13 +45,26 @@ export const logAction = async (action, entityType, entityId, oldValue, newValue
   const owner_id = authData?.user?.id || null;
   const localSession = getJson(STORAGE_KEYS.AUTH, { username: 'Bilinmeyen' });
 
+  const sensitiveFields = ['password', 'pin', 'pattern', 'screenpassword', 'devicepassword', 'accesscode', 'passwordhash'];
+  
+  const redact = (val) => {
+    if (!val || typeof val !== 'object') return val;
+    const redacted = { ...val };
+    for (const k of Object.keys(redacted)) {
+      if (sensitiveFields.includes(k.toLowerCase())) {
+        redacted[k] = '[GİZLENDİ]';
+      }
+    }
+    return redacted;
+  };
+
   const newLog = {
     id: Math.random().toString(36).substring(2, 15),
     action,
     entity_type: entityType,
     entity_id: entityId,
-    old_value: oldValue,
-    new_value: newValue,
+    old_value: redact(oldValue),
+    new_value: redact(newValue),
     created_at: new Date().toISOString(),
     username: localSession.username
   };
@@ -76,8 +89,8 @@ export const logAction = async (action, entityType, entityId, oldValue, newValue
         action,
         entity_type: entityType,
         entity_id: entityId,
-        old_value: oldValue,
-        new_value: newValue
+        old_value: redact(oldValue),
+        new_value: redact(newValue)
       });
     } catch (err) {
       console.error("Supabase audit log error:", err);
@@ -143,28 +156,13 @@ export const calculatePhoneCosts = (phone) => {
 
 // Initialize DB and seed demo data if empty
 export const initDb = async (force = false) => {
-  // 8. Auth session (default admin user: admin@telefoncum.com / 123456)
-  const defaultAuth = {
-    username: 'admin@telefoncum.com',
-    passwordHash: '8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92', // SHA-256 of '123456'
-    isLoggedIn: false,
-    role: 'admin',
-    mustChangePassword: true
-  };
-  
+  // 8. Auth session (Removed default admin for security)
+  // The system should rely on Supabase for auth.
   const existingUserStr = localStorage.getItem('tys_admin_user');
-  if (existingUserStr) {
-    try {
-      const existingUser = JSON.parse(existingUserStr);
-      // Eski MD5 veya sadece 'admin' olan verileri yeni asenkron SHA-256 standardına dönüştür
-      if (existingUser.username === 'admin' || (existingUser.passwordHash && existingUser.passwordHash.length === 32)) {
-        localStorage.setItem('tys_admin_user', JSON.stringify(defaultAuth));
-      }
-    } catch (e) {
-      localStorage.setItem('tys_admin_user', JSON.stringify(defaultAuth));
-    }
+  if (existingUserStr && import.meta.env.DEV) {
+    // Only in DEV environment we keep existing local user.
   } else {
-    localStorage.setItem('tys_admin_user', JSON.stringify(defaultAuth));
+    localStorage.removeItem('tys_admin_user');
   }
 
   if (!force && localStorage.getItem(STORAGE_KEYS.PHONES)) {

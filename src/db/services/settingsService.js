@@ -16,11 +16,29 @@ export const settingsService = {
   },
 
   exportDatabase: () => {
-    const db = {};
+    const db = { _version: '2.0' };
+    const EXCLUDED_KEYS = [STORAGE_KEYS.AUTH, STORAGE_KEYS.AUDIT_LOG, 'tys_admin_user'];
+    
     Object.keys(STORAGE_KEYS).forEach(k => {
-      db[STORAGE_KEYS[k]] = localStorage.getItem(STORAGE_KEYS[k]);
+      const key = STORAGE_KEYS[k];
+      if (EXCLUDED_KEYS.includes(key)) return;
+      
+      let dataStr = localStorage.getItem(key);
+      if (!dataStr) return;
+      
+      // Mask device passwords in repairs before exporting
+      if (key === STORAGE_KEYS.REPAIRS) {
+        try {
+          const repairs = JSON.parse(dataStr);
+          if (Array.isArray(repairs)) {
+            dataStr = JSON.stringify(repairs.map(r => ({ ...r, devicePassword: r.devicePassword ? '[GİZLENDİ]' : '' })));
+          }
+        } catch (e) {}
+      }
+      
+      db[key] = dataStr;
     });
-    db['tys_admin_user'] = localStorage.getItem('tys_admin_user');
+    
     return JSON.stringify(db);
   },
 
@@ -32,13 +50,19 @@ export const settingsService = {
       }
 
       // Validasyon aşaması: Sadece geçerli anahtarları ve bozuk olmayan JSON verilerini kabul et
-      const validKeys = [...Object.values(STORAGE_KEYS), 'tys_admin_user'];
+      const validKeys = Object.values(STORAGE_KEYS).filter(k => k !== STORAGE_KEYS.AUTH && k !== STORAGE_KEYS.AUDIT_LOG);
       const dataToSave = {};
 
       for (const key of Object.keys(db)) {
+        if (key === '__proto__' || key === 'constructor' || key === 'prototype') continue;
+        if (key === '_version') continue;
+        
         if (validKeys.includes(key) && db[key]) {
            try {
-             JSON.parse(db[key]); // Sadece geçerli JSON ise hata atmaz
+             const parsed = JSON.parse(db[key]); // Sadece geçerli JSON ise hata atmaz
+             if (Array.isArray(parsed) && parsed.length > 50000) {
+                 throw new Error(`Kayıt sayısı çok yüksek: ${key}`);
+             }
              dataToSave[key] = db[key];
            } catch (err) {
              throw new Error(`'${key}' verisi bozuk veya geçersiz formatta.`);

@@ -21,6 +21,7 @@ import {
 import { repairService } from '../db/services/repairService';
 import { phoneService } from '../db/services/phoneService';
 import { customerService } from '../db/services/customerService';
+import { escapeHtml } from '../utils/security';
 
 export default function RepairManager({ activePage, globalSearchQuery }) {
   const [repairs, setRepairs] = useState([]);
@@ -183,7 +184,11 @@ export default function RepairManager({ activePage, globalSearchQuery }) {
       
       const payload = { ...formData, cost: computedCost, customerId: finalCustomerId };
 
-      repairService.save(editingRepair ? { ...editingRepair, ...payload } : payload);
+      // Do not store device password persistently per security policy
+      const payloadToSave = { ...payload };
+      delete payloadToSave.devicePassword;
+
+      repairService.save(editingRepair ? { ...editingRepair, ...payloadToSave } : payloadToSave);
       setShowAddEditModal(false);
       loadData();
     } catch (err) {
@@ -238,89 +243,119 @@ export default function RepairManager({ activePage, globalSearchQuery }) {
   };
 
   // Print Service Receipt
-  const handlePrintReceipt = (repair) => {
-    const customer = repair.customerId ? customers.find(c => c.id === repair.customerId) : null;
+  const handlePrintReceipt = (repairData, isTechnician = false) => {
+    if (isTechnician) {
+      if (!confirm('DİKKAT: Bu çıktı sadece teknisyen kullanımı içindir ve cihaz ekran şifresini içerir. Müşteriye vermeyiniz!')) return;
+    }
+    const customer = repairData.customerId ? customers.find(c => c.id === repairData.customerId) : null;
     const printWindow = window.open('', '_blank', 'width=800,height=600');
     if (!printWindow) {
       alert("Popup engelleyiciyi kapatın.");
       return;
     }
-    printWindow.document.write(`
-      <html>
-        <head>
-          <title>Servis Kabul Formu</title>
-          <style>
-            body { font-family: system-ui, sans-serif; padding: 40px; color: #111; }
-            .header { text-align: center; border-bottom: 2px solid #eee; padding-bottom: 20px; margin-bottom: 30px; }
-            .title { font-size: 24px; font-weight: bold; margin: 0; }
-            .meta { display: flex; justify-content: space-between; margin-bottom: 30px; font-size: 14px; }
-            .box { border: 1px solid #ccc; padding: 15px; border-radius: 8px; margin-bottom: 20px; }
-            .label { font-weight: bold; color: #555; font-size: 12px; text-transform: uppercase; margin-bottom: 5px; }
-            .val { font-size: 16px; margin-bottom: 15px; }
-            table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-            th, td { padding: 10px; border-bottom: 1px solid #eee; text-align: left; }
-            .signatures { display: flex; justify-content: space-between; margin-top: 50px; }
-            .sign-box { width: 45%; text-align: center; border-top: 1px solid #000; padding-top: 10px; }
-          </style>
-        </head>
-        <body>
-          <div class="header">
-            <h1 class="title">TEKNİK SERVİS FORMU</h1>
-            <div>Kayıt No: ${repair.id.replace('rep-', '')}</div>
-          </div>
-          <div class="meta">
-            <div><strong>Tarih:</strong> ${new Date().toLocaleDateString('tr-TR')}</div>
-            <div><strong>Teknisyen:</strong> ${repair.technician || 'Belirtilmedi'}</div>
-          </div>
-          
-          <div class="box">
-            <div class="label">Müşteri Bilgileri</div>
-            <div class="val">${customer ? (customer.fullName + ' - ' + customer.phone) : 'Kayıtsız Müşteri'}</div>
-            
-            <div class="label">Cihaz Tanımı</div>
-            <div class="val">${repair.phoneDescription}</div>
-            
-            <div class="label">Arıza / Şikayet</div>
-            <div class="val">${repair.defect}</div>
 
-            <div class="label">Cihaz Şifresi / Deseni</div>
-            <div class="val">${repair.devicePassword || 'Yok / Belirtilmedi'}</div>
-          </div>
+    const doc = printWindow.document;
+    doc.head.innerHTML = '<title>Servis Kabul Formu</title>';
+    
+    const style = doc.createElement('style');
+    style.textContent = `
+      body { font-family: system-ui, sans-serif; padding: 40px; color: #111; }
+      .header { text-align: center; border-bottom: 2px solid #eee; padding-bottom: 20px; margin-bottom: 30px; }
+      .title { font-size: 24px; font-weight: bold; margin: 0; }
+      .meta { display: flex; justify-content: space-between; margin-bottom: 30px; font-size: 14px; }
+      .box { border: 1px solid #ccc; padding: 15px; border-radius: 8px; margin-bottom: 20px; }
+      .label { font-weight: bold; color: #555; font-size: 12px; text-transform: uppercase; margin-bottom: 5px; }
+      .val { font-size: 16px; margin-bottom: 15px; }
+      table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+      th, td { padding: 10px; border-bottom: 1px solid #eee; text-align: left; }
+      .signatures { display: flex; justify-content: space-between; margin-top: 50px; }
+      .sign-box { width: 45%; text-align: center; border-top: 1px solid #000; padding-top: 10px; }
+      .tech-warn { color: red; font-weight: bold; text-align: center; margin-bottom: 10px; border: 2px dashed red; padding: 10px; }
+    `;
+    doc.head.appendChild(style);
 
-          <div class="box">
-            <div class="label">Uygulanan İşlemler ve Notlar</div>
-            <div class="val">${repair.actionTaken || '-'}</div>
-            ${repair.spareParts && repair.spareParts.length > 0 ? `
-              <div class="label" style="margin-top:20px;">Kullanılan Parçalar</div>
-              <table>
-                <tr><th>Parça Adı</th><th style="text-align:right">Fiyat</th></tr>
-                ${repair.spareParts.map(p => `<tr><td>${p.name}</td><td style="text-align:right">${p.price} TL</td></tr>`).join('')}
-              </table>
-            ` : ''}
-            <div style="margin-top:20px; text-align:right; font-size:18px;">
-              <strong>Toplam Tutar:</strong> ${repair.cost} TL
-            </div>
-          </div>
+    const container = doc.createElement('div');
+    
+    if (isTechnician) {
+      const warn = doc.createElement('div');
+      warn.className = 'tech-warn';
+      warn.textContent = 'DİKKAT: TEKNİSYEN KOPYASI - MÜŞTERİYE VERMEYİNİZ!';
+      container.appendChild(warn);
+    }
 
-          <div style="font-size: 11px; color: #666; margin-top: 30px; text-align: justify;">
-            <strong>ŞARTLAR:</strong> Teslim edilen cihazların 30 gün içinde alınması gerekmektedir. Teslim alınmayan cihazlardan firmamız sorumlu değildir. Veri kaybından firmamız sorumlu tutulamaz, lütfen verilerinizi yedekleyiniz. Garanti süresi: ${repair.warrantyMonths || 0} ay.
-          </div>
+    const header = doc.createElement('div');
+    header.className = 'header';
+    header.innerHTML = '<h1 class="title">TEKNİK SERVİS FORMU</h1><div id="p-id"></div>';
+    header.querySelector('#p-id').textContent = 'Kayıt No: ' + (repairData.id ? repairData.id.replace('rep-', '') : 'KAYDEDİLMEMİŞ TASLAK');
+    container.appendChild(header);
 
-          <div class="signatures">
-            <div class="sign-box">Müşteri İmzası</div>
-            <div class="sign-box">Teslim Alan / Teknisyen</div>
-          </div>
+    const meta = doc.createElement('div');
+    meta.className = 'meta';
+    meta.innerHTML = '<div><strong>Tarih:</strong> <span id="p-date"></span></div><div><strong>Teknisyen:</strong> <span id="p-tech"></span></div>';
+    meta.querySelector('#p-date').textContent = new Date().toLocaleDateString('tr-TR');
+    meta.querySelector('#p-tech').textContent = repairData.technician || 'Belirtilmedi';
+    container.appendChild(meta);
 
-          <script>
-            window.onload = function() {
-              window.print();
-              setTimeout(function() { window.close(); }, 500);
-            };
-          </script>
-        </body>
-      </html>
-    `);
-    printWindow.document.close();
+    const box1 = doc.createElement('div');
+    box1.className = 'box';
+    box1.innerHTML = `
+      <div class="label">Müşteri Bilgileri</div><div class="val" id="p-cust"></div>
+      <div class="label">Cihaz Tanımı</div><div class="val" id="p-desc"></div>
+      <div class="label">Arıza / Şikayet</div><div class="val" id="p-def"></div>
+      <div class="label">Cihaz Şifresi / Deseni</div><div class="val" id="p-pass"></div>
+    `;
+    box1.querySelector('#p-cust').textContent = customer ? (customer.fullName + ' - ' + customer.phone) : 'Kayıtsız Müşteri';
+    box1.querySelector('#p-desc').textContent = repairData.phoneDescription || '-';
+    box1.querySelector('#p-def').textContent = repairData.defect || '-';
+    
+    let passVal = repairData.devicePassword || 'Yok / Belirtilmedi';
+    if (!isTechnician && passVal !== 'Yok / Belirtilmedi') {
+      passVal = '[GİZLENDİ]';
+    }
+    box1.querySelector('#p-pass').textContent = passVal;
+    container.appendChild(box1);
+
+    const box2 = doc.createElement('div');
+    box2.className = 'box';
+    box2.innerHTML = '<div class="label">Uygulanan İşlemler ve Notlar</div><div class="val" id="p-act"></div><div id="p-parts"></div><div style="margin-top:20px; text-align:right; font-size:18px;"><strong>Toplam Tutar:</strong> <span id="p-cost"></span> TL</div>';
+    box2.querySelector('#p-act').textContent = repairData.actionTaken || '-';
+    box2.querySelector('#p-cost').textContent = repairData.cost || 0;
+    
+    if (repairData.spareParts && repairData.spareParts.length > 0) {
+      const partsDiv = doc.createElement('div');
+      partsDiv.innerHTML = '<div class="label" style="margin-top:20px;">Kullanılan Parçalar</div><table><tr><th>Parça Adı</th><th style="text-align:right">Fiyat</th></tr><tbody id="p-parts-body"></tbody></table>';
+      const tbody = partsDiv.querySelector('#p-parts-body');
+      repairData.spareParts.forEach(p => {
+        const tr = doc.createElement('tr');
+        const tdName = doc.createElement('td');
+        tdName.textContent = p.name;
+        const tdPrice = doc.createElement('td');
+        tdPrice.style.textAlign = 'right';
+        tdPrice.textContent = p.price + ' TL';
+        tr.appendChild(tdName);
+        tr.appendChild(tdPrice);
+        tbody.appendChild(tr);
+      });
+      box2.querySelector('#p-parts').appendChild(partsDiv);
+    }
+    container.appendChild(box2);
+
+    const terms = doc.createElement('div');
+    terms.style.cssText = 'font-size: 11px; color: #666; margin-top: 30px; text-align: justify;';
+    terms.textContent = `ŞARTLAR: Teslim edilen cihazların 30 gün içinde alınması gerekmektedir. Teslim alınmayan cihazlardan firmamız sorumlu değildir. Veri kaybından firmamız sorumlu tutulamaz, lütfen verilerinizi yedekleyiniz. Garanti süresi: ${repairData.warrantyMonths || 0} ay.`;
+    container.appendChild(terms);
+
+    const signatures = doc.createElement('div');
+    signatures.className = 'signatures';
+    signatures.innerHTML = '<div class="sign-box">Müşteri İmzası</div><div class="sign-box">Teslim Alan / Teknisyen</div>';
+    container.appendChild(signatures);
+
+    doc.body.appendChild(container);
+    
+    printWindow.onload = function() {
+      printWindow.print();
+      setTimeout(function() { printWindow.close(); }, 500);
+    };
   };
 
   // Delete Action
@@ -654,9 +689,12 @@ export default function RepairManager({ activePage, globalSearchQuery }) {
                     type="text"
                     value={formData.devicePassword}
                     onChange={(e) => setFormData(prev => ({ ...prev, devicePassword: e.target.value }))}
-                    placeholder="Ekran şifresi"
+                    placeholder="Ekran şifresi (SADECE yazdırılır, KAYDEDİLMEZ)"
                     className="w-full p-2.5 border border-slate-200 dark:border-slate-800 rounded-xl bg-transparent"
                   />
+                  <div className="text-[9px] text-amber-600 mt-1">
+                    Güvenlik nedeni ile şifreler veritabanına kaydedilmez. Yalnızca formu yazdırırken görünür.
+                  </div>
                 </div>
               </div>
 
@@ -812,20 +850,39 @@ export default function RepairManager({ activePage, globalSearchQuery }) {
               </div>
 
               {/* Buttons */}
-              <div className="flex justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
-                <button
-                  type="button"
-                  onClick={() => setShowAddEditModal(false)}
-                  className="px-4 py-2 border border-slate-200 dark:border-slate-850 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl font-semibold cursor-pointer"
-                >
-                  Vazgeç
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 bg-indigo-650 hover:bg-indigo-700 text-white font-semibold rounded-xl cursor-pointer"
-                >
-                  Kaydet
-                </button>
+              <div className="flex justify-between items-center pt-2 border-t border-slate-100 dark:border-slate-800">
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handlePrintReceipt(formData, true)}
+                    className="px-3 py-2 border border-rose-200 text-rose-600 hover:bg-rose-50 dark:border-rose-900 dark:text-rose-400 dark:hover:bg-rose-950/30 rounded-xl text-[10px] font-bold flex items-center gap-1"
+                    title="Bu form kaydedilmese bile şifreyi ekrana yazdırır. Müşteriye vermeyin."
+                  >
+                    <Printer size={12}/> Teknisyen Çıktısı (Şifreli)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handlePrintReceipt(formData, false)}
+                    className="px-3 py-2 border border-slate-200 hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-800 rounded-xl text-[10px] font-bold flex items-center gap-1"
+                  >
+                    <Printer size={12}/> Müşteri Fişi
+                  </button>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowAddEditModal(false)}
+                    className="px-4 py-2 border border-slate-200 dark:border-slate-850 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl font-semibold cursor-pointer"
+                  >
+                    Vazgeç
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-4 py-2 bg-indigo-650 hover:bg-indigo-700 text-white font-semibold rounded-xl cursor-pointer"
+                  >
+                    Kaydet
+                  </button>
+                </div>
               </div>
 
             </form>

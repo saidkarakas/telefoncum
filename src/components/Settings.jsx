@@ -200,6 +200,7 @@ export default function SettingsPage({ activePage }) {
         <p className="text-slate-500 text-[11px] leading-relaxed">
           Tüm verileriniz yerel tarayıcı belleğinde (LocalStorage) tutulduğu için tarayıcı temizliğinde kaybolabilir. 
           Güvenliğiniz için belirli aralıklarla sistem yedeğinizi bilgisayarınıza indirmeniz önerilir.
+          <br/><strong className="text-amber-600">Uyarı:</strong> İndirilen JSON yedek dosyası şifreli DEĞİLDİR. Lütfen yedeğinizi güvenli bir ortamda saklayın.
         </p>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">

@@ -17,6 +17,7 @@ import {
 import { QRCodeSVG } from 'qrcode.react';
 import { phoneService } from '../db/services/phoneService';
 import { calculatePhoneCosts } from '../db/services/shared';
+import { escapeHtml } from '../utils/security';
 
 export default function PhoneDetail({ phoneId, onClose, onDataChanged }) {
   const [phone, setPhone] = useState(null);
@@ -97,36 +98,41 @@ export default function PhoneDetail({ phoneId, onClose, onDataChanged }) {
     const svgData = new XMLSerializer().serializeToString(svgNode);
     
     const printWindow = window.open('', '_blank', 'width=400,height=400');
-    printWindow.document.write(`
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <title>Etiket Yazdır - ${phone.model}</title>
-          <style>
-            @page { margin: 0; size: 58mm 40mm; }
-            body { 
-              margin: 0; padding: 5px; text-align: center; font-family: sans-serif;
-              width: 58mm; display: flex; flex-direction: column; align-items: center; justify-content: center;
-            }
-            .title { font-size: 10px; font-weight: bold; margin-bottom: 2px; }
-            .subtitle { font-size: 8px; color: #333; margin-bottom: 4px; }
-            .qr-container svg { width: 30mm; height: 30mm; }
-          </style>
-        </head>
-        <body>
-          <div class="title">${phone.brand} ${phone.model}</div>
-          <div class="subtitle">${phone.storage} - ${phone.color}</div>
-          <div class="qr-container">${svgData}</div>
-          <script>
-            window.onload = function() {
-              window.print();
-              setTimeout(function() { window.close(); }, 500);
-            };
-          </script>
-        </body>
-      </html>
-    `);
-    printWindow.document.close();
+    const doc = printWindow.document;
+    doc.head.innerHTML = '<title>Etiket Yazdır</title>';
+    const style = doc.createElement('style');
+    style.textContent = `
+      @page { margin: 0; size: 58mm 40mm; }
+      body { 
+        margin: 0; padding: 5px; text-align: center; font-family: sans-serif;
+        width: 58mm; display: flex; flex-direction: column; align-items: center; justify-content: center;
+      }
+      .title { font-size: 10px; font-weight: bold; margin-bottom: 2px; }
+      .subtitle { font-size: 8px; color: #333; margin-bottom: 4px; }
+      .qr-container svg { width: 30mm; height: 30mm; }
+    `;
+    doc.head.appendChild(style);
+
+    const titleDiv = doc.createElement('div');
+    titleDiv.className = 'title';
+    titleDiv.textContent = phone.brand + ' ' + phone.model;
+
+    const subTitleDiv = doc.createElement('div');
+    subTitleDiv.className = 'subtitle';
+    subTitleDiv.textContent = phone.storage + ' - ' + phone.color;
+
+    const qrContainer = doc.createElement('div');
+    qrContainer.className = 'qr-container';
+    qrContainer.innerHTML = svgData;
+
+    doc.body.appendChild(titleDiv);
+    doc.body.appendChild(subTitleDiv);
+    doc.body.appendChild(qrContainer);
+
+    printWindow.onload = function() {
+      printWindow.print();
+      setTimeout(function() { printWindow.close(); }, 500);
+    };
   };
 
   // Get Status Style

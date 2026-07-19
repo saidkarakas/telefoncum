@@ -86,7 +86,12 @@ export const authService = {
         throw err;
       }
     } else {
-      // Supabase Yoksa SADECE Yerel Admin
+      // Supabase Yoksa SADECE Yerel Admin (Geliştirme veya Demo modunda)
+      const isDevOrDemo = import.meta.env.DEV || import.meta.env.VITE_ENABLE_INSECURE_DEMO_MODE === 'true';
+      if (!isDevOrDemo) {
+        throw new Error("Yerel giriş sistemi güvenlik nedeniyle üretim ortamında devre dışıdır. Lütfen Supabase yapılandırmanızı kontrol edin.");
+      }
+
       const userStr = localStorage.getItem('tys_admin_user');
       let localMatched = false;
       let localUser = null;
@@ -116,6 +121,7 @@ export const authService = {
         return { success: true, mustChangePassword: localUser.mustChangePassword === true };
       }
       
+      // Hatalı giriş mesajında hesabın var olup olmadığını belli etme
       recordFailedAttempt();
       return { success: false };
     }
