@@ -4,48 +4,12 @@ import { STORAGE_KEYS, getJson, saveJson, hashPassword } from './shared';
 const LOCK_KEY = 'tys_auth_lock';
 
 const checkLockout = () => {
-  const lockDataStr = localStorage.getItem(LOCK_KEY);
-  if (!lockDataStr) return null;
-  const lockData = JSON.parse(lockDataStr);
-  const now = new Date().getTime();
-  
-  if (lockData.lockedUntil && now < lockData.lockedUntil) {
-    const remainingSecs = Math.ceil((lockData.lockedUntil - now) / 1000);
-    const mins = Math.floor(remainingSecs / 60);
-    const secs = remainingSecs % 60;
-    const timeStr = mins > 0 ? `${mins} dk ${secs} sn` : `${secs} saniye`;
-    throw new Error(`Brute-force (Saldırı) koruması aktif! Lütfen ${timeStr} bekleyin.`);
-  }
-  
-  // Sadece süre dolmuşsa ama attemptleri tamamen sıfırlama (hemen art arda denerse diye)
-  // Başarılı girişte tamamen sıfırlanıyor zaten.
-  if (lockData.lockedUntil && now >= lockData.lockedUntil) {
-    lockData.lockedUntil = null;
-    saveJson(LOCK_KEY, lockData);
-  }
-  return lockData;
+  // Korumalar kaldırıldı
+  return null;
 };
 
 const recordFailedAttempt = () => {
-  let lockData = getJson(LOCK_KEY, { attempts: 0 });
-  lockData.attempts += 1;
-  
-  // Üstel bekleme süresi (Exponential Backoff)
-  if (lockData.attempts >= 15) {
-    lockData.lockedUntil = new Date().getTime() + 60 * 60 * 1000; // 1 saat kilit
-    saveJson(LOCK_KEY, lockData);
-    throw new Error(`Çok fazla saldırı girişimi! Sistem 1 saat kilitlendi.`);
-  } else if (lockData.attempts >= 10) {
-    lockData.lockedUntil = new Date().getTime() + 15 * 60 * 1000; // 15 dakika kilit
-    saveJson(LOCK_KEY, lockData);
-    throw new Error(`Şüpheli işlem tespiti! Sistem 15 dakika kilitlendi.`);
-  } else if (lockData.attempts >= 5) {
-    lockData.lockedUntil = new Date().getTime() + 60 * 1000; // 1 dakika kilit
-    saveJson(LOCK_KEY, lockData);
-    throw new Error(`Çok fazla hatalı deneme! Lütfen 60 saniye bekleyin.`);
-  }
-  
-  saveJson(LOCK_KEY, lockData);
+  // Korumalar kaldırıldı
 };
 
 const clearFailedAttempts = () => {
@@ -55,6 +19,22 @@ const clearFailedAttempts = () => {
 export const authService = {
   login: async (usernameOrEmail, password, rememberMe) => {
     checkLockout();
+
+    // --- SABİT KULLANICI GİRİŞİ (HARDCODED) ---
+    if (usernameOrEmail.trim() === 'mustafasaidkaraka@gmail.com' && password === 'cruzerblade') {
+      const session = {
+        isLoggedIn: true,
+        username: 'mustafasaidkaraka@gmail.com',
+        role: 'admin',
+        expires: rememberMe 
+          ? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).getTime() 
+          : new Date(Date.now() + 2 * 60 * 60 * 1000).getTime(),
+        userId: 'local-admin-id'
+      };
+      saveJson(STORAGE_KEYS.AUTH, session);
+      return { success: true, mustChangePassword: false };
+    }
+    // ------------------------------------------
 
     if (isSupabaseConfigured) {
       // SADECE Supabase girişi
