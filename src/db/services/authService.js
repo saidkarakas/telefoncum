@@ -115,44 +115,6 @@ export const authService = {
   changeLocalPassword: async (newPassword) => {
     const userStr = localStorage.getItem('tys_admin_user');
     if (!userStr) throw new Error("Kullanıcı bulunamadı.");
-
-      const userStr = localStorage.getItem('tys_admin_user');
-      let localMatched = false;
-      let localUser = null;
-
-      if (userStr) {
-        localUser = JSON.parse(userStr);
-        const hashedInput = await hashPassword(password);
-        if (
-          usernameOrEmail.trim().toLowerCase() === localUser.username.toLowerCase() && 
-          hashedInput === localUser.passwordHash
-        ) {
-          localMatched = true;
-        }
-      }
-
-      if (localMatched) {
-        clearFailedAttempts();
-        const session = {
-          isLoggedIn: true,
-          username: localUser.username,
-          role: localUser.role || 'admin',
-          expires: rememberMe 
-            ? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).getTime() 
-            : new Date(Date.now() + 2 * 60 * 60 * 1000).getTime()
-        };
-        saveJson(STORAGE_KEYS.AUTH, session);
-        return { success: true, mustChangePassword: localUser.mustChangePassword === true };
-      }
-      
-      // Hatalı giriş mesajında hesabın var olup olmadığını belli etme
-      recordFailedAttempt();
-      return { success: false };
-    }
-  },
-  changeLocalPassword: async (newPassword) => {
-    const userStr = localStorage.getItem('tys_admin_user');
-    if (!userStr) throw new Error("Kullanıcı bulunamadı.");
     const user = JSON.parse(userStr);
     user.passwordHash = await hashPassword(newPassword);
     user.mustChangePassword = false;
