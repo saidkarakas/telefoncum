@@ -85,12 +85,36 @@ export const authService = {
         console.error("Supabase Auth hatası:", err);
         throw err;
       }
-    } else {
-      // Supabase Yoksa SADECE Yerel Admin (Geliştirme veya Demo modunda)
-      const isDevOrDemo = import.meta.env.DEV || import.meta.env.VITE_ENABLE_INSECURE_DEMO_MODE === 'true';
-      if (!isDevOrDemo) {
-        throw new Error("Yerel giriş sistemi güvenlik nedeniyle üretim ortamında devre dışıdır. Lütfen Supabase yapılandırmanızı kontrol edin.");
+    }
+  },
+
+  signInWithGoogle: async () => {
+    if (!isSupabaseConfigured) {
+      throw new Error('Supabase yapılandırması eksik. Lütfen .env dosyasını kontrol edin.');
+    }
+
+    const { data, error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: window.location.origin
       }
+    });
+
+    if (error) {
+      console.error('Google OAuth hatası:', error);
+      throw new Error(error.message);
+    }
+
+    if (data?.url) {
+      window.location.href = data.url;
+    }
+
+    return data;
+  },
+
+  changeLocalPassword: async (newPassword) => {
+    const userStr = localStorage.getItem('tys_admin_user');
+    if (!userStr) throw new Error("Kullanıcı bulunamadı.");
 
       const userStr = localStorage.getItem('tys_admin_user');
       let localMatched = false;

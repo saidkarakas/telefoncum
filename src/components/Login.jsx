@@ -46,6 +46,17 @@ export default function Login({ onLoginSuccess }) {
     }
   };
 
+  const handleGoogleSignIn = async () => {
+    setError('');
+    setLoading(true);
+    try {
+      await authService.signInWithGoogle();
+    } catch (err) {
+      setLoading(false);
+      setError(err.message || 'Google ile giriş yapılamadı.');
+    }
+  };
+
   const handlePasswordChange = async (e) => {
     e.preventDefault();
     setError('');
@@ -166,6 +177,16 @@ export default function Login({ onLoginSuccess }) {
               ) : (
                 'Giriş Yap'
               )}
+            </button>
+
+            <button
+              type="button"
+              onClick={handleGoogleSignIn}
+              disabled={loading}
+              className="w-full py-3 px-4 rounded-xl text-slate-800 font-semibold bg-white border border-slate-200 hover:bg-slate-100 active:scale-[0.98] transition-all duration-150 disabled:opacity-50 shadow-sm flex items-center justify-center gap-2"
+            >
+              <img src="https://www.svgrepo.com/show/355037/google.svg" alt="Google" className="w-5 h-5" />
+              Google ile Giriş Yap
             </button>
           </form>
         ) : (
