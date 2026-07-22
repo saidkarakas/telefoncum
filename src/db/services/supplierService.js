@@ -1,4 +1,4 @@
-import { STORAGE_KEYS, getJson, saveJson, generateUUID, safeNumber, round2 } from './shared';
+import { STORAGE_KEYS, getJson, saveJson, generateUUID, parseNumber, round2 } from './shared';
 
 export const normalizePhone = (value) => {
   if (!value) return '';
@@ -30,27 +30,28 @@ export const supplierService = {
     const transactions = getJson(STORAGE_KEYS.TRANSACTIONS, []);
 
     return suppliers.map(s => {
+      const displayName = (s.fullName || s.name || 'Tedarikçi').trim();
       const supplierPhones = phones.filter(p => p.boughtFromId === s.id);
       const contactTransactions = transactions.filter(t => t.contactId === s.id && t.contactType === 'supplier');
       
       const purchaseDebt = contactTransactions
         .filter(t => t.type === 'purchase_debt' || t.type === 'trade_difference_payable')
-        .reduce((sum, t) => sum + safeNumber(t.amount), 0);
+        .reduce((sum, t) => sum + parseNumber(t.amount), 0);
 
       const payments = contactTransactions
         .filter(t => t.type === 'payment' || t.type === 'odeme')
-        .reduce((sum, t) => sum + safeNumber(t.amount), 0);
+        .reduce((sum, t) => sum + parseNumber(t.amount), 0);
 
       const collectionsFromSupplier = contactTransactions
         .filter(t => t.type === 'collection' || t.type === 'tahsilat' || t.type === 'trade_difference_receivable')
-        .reduce((sum, t) => sum + safeNumber(t.amount), 0);
+        .reduce((sum, t) => sum + parseNumber(t.amount), 0);
 
       // Fallback for legacy phone purchases where no purchase_debt transaction exists
       let legacyPurchaseDebt = 0;
       supplierPhones.forEach(p => {
         const hasTx = contactTransactions.some(t => t.sourceId === p.id || t.phoneId === p.id);
         if (!hasTx) {
-          legacyPurchaseDebt += safeNumber(p.purchasePrice);
+          legacyPurchaseDebt += parseNumber(p.purchasePrice);
         }
       });
 
@@ -59,6 +60,8 @@ export const supplierService = {
 
       return {
         ...s,
+        fullName: displayName,
+        name: displayName,
         totalPhones: supplierPhones.length,
         totalPurchases,
         debt: balance > 0 ? balance : 0,
@@ -77,15 +80,15 @@ export const supplierService = {
   findByPhone: (phone) => {
     const norm = normalizePhone(phone);
     if (!norm) return null;
-    const suppliers = getJson(STORAGE_KEYS.SUPPLIERS, []);
+    const suppliers = supplierService.getAll();
     return suppliers.find(s => normalizePhone(s.phone) === norm) || null;
   },
 
   findByName: (name) => {
     const norm = normalizeName(name);
     if (!norm) return null;
-    const suppliers = getJson(STORAGE_KEYS.SUPPLIERS, []);
-    return suppliers.find(s => normalizeName(s.name) === norm) || null;
+    const suppliers = supplierService.getAll();
+    return suppliers.find(s => normalizeName(s.fullName || s.name) === norm) || null;
   },
 
   findOrCreate: async (data) => {
@@ -96,7 +99,8 @@ export const supplierService = {
     }
 
     const normPhone = normalizePhone(data.phone);
-    const normName = normalizeName(data.name);
+    const inputName = data.fullName || data.name || '';
+    const normName = normalizeName(inputName);
 
     if (!normPhone && !normName) return null;
 
@@ -115,9 +119,11 @@ export const supplierService = {
       return supplierService.getById(existing.id);
     }
 
+    const cleanName = (inputName || 'Tedarikçi').trim();
     const newSupplier = {
       id: data.id || generateUUID(),
-      name: data.name ? data.name.trim() : 'Tedarikçi',
+      fullName: cleanName,
+      name: cleanName,
       phone: data.phone ? data.phone.trim() : '',
       address: data.address ? data.address.trim() : '',
       notes: data.notes ? data.notes.trim() : '',
@@ -130,23 +136,36 @@ export const supplierService = {
 
   save: async (supplierData) => {
     const suppliers = getJson(STORAGE_KEYS.SUPPLIERS, []);
-    const exists = supplierData.id ? suppliers.some(s => s.id === supplierData.id) : false;
+    const cleanName = (supplierData.fullName || supplierData.name || 'Tedarikçi').trim();
+    
+    const preparedData = {
+      ...supplierData,
+      fullName: cleanName,
+      name: cleanName,
+      id: supplierData.id || generateUUID(),
+      createdAt: supplierData.createdAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+
+    const exists = suppliers.some(s => s.id === preparedData.id);
     let updated;
     if (exists) {
-      updated = suppliers.map(s => s.id === supplierData.id ? { ...s, ...supplierData } : s);
+      updated = suppliers.map(s => s.id === preparedData.id ? { ...s, ...preparedData } : s);
     } else {
-      const newSupp = {
-        ...supplierData,
-        id: supplierData.id || generateUUID(),
-        createdAt: supplierData.createdAt || new Date().toISOString()
-      };
-      updated = [...suppliers, newSupp];
+      updated = [...suppliers, preparedData];
     }
     await saveJson(STORAGE_KEYS.SUPPLIERS, updated);
     return true;
   },
 
   delete: async (id) => {
+    const phones = getJson(STORAGE_KEYS.PHONES, []);
+    const hasPhoneLink = phones.some(p => p.boughtFromId === id);
+
+    if (hasPhoneLink) {
+      throw new Error("Bu tedarikçiden satın alınmış cihazlar bulunduğu için tedarikçi silinemez.");
+    }
+
     const suppliers = getJson(STORAGE_KEYS.SUPPLIERS, []);
     await saveJson(STORAGE_KEYS.SUPPLIERS, suppliers.filter(s => s.id !== id));
     const transactions = getJson(STORAGE_KEYS.TRANSACTIONS, []);

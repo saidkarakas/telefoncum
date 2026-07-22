@@ -1,4 +1,4 @@
-import { STORAGE_KEYS, getJson, saveJson, generateUUID, safeNumber, round2 } from './shared';
+import { STORAGE_KEYS, getJson, saveJson, generateUUID, parseNumber, validateNonNegative } from './shared';
 import { stockMovementService } from './stockMovementService';
 
 export const PART_CATEGORIES = [
@@ -66,10 +66,10 @@ export const partService = {
     }
 
     let updated;
-    const cleanQty = Math.max(0, parseInt(partData.quantity || 0, 10));
-    const cleanMinQty = Math.max(0, parseInt(partData.minQuantity || 0, 10));
-    const purchasePrice = safeNumber(partData.purchasePrice);
-    const salePrice = safeNumber(partData.salePrice);
+    const cleanQty = validateNonNegative(partData.quantity || 0, 'Stok Miktarı');
+    const cleanMinQty = validateNonNegative(partData.minQuantity || 0, 'Minimum Stok Miktarı');
+    const purchasePrice = validateNonNegative(partData.purchasePrice || 0, 'Parça Alış Fiyatı');
+    const salePrice = validateNonNegative(partData.salePrice || 0, 'Parça Satış Fiyatı');
     const exists = partData.id ? parts.some(p => p.id === partData.id) : false;
 
     if (exists) {
@@ -151,8 +151,8 @@ export const partService = {
     }
 
     const part = parts[partIndex];
-    const prevQty = safeNumber(part.quantity);
-    const delta = safeNumber(deltaQuantity, true);
+    const prevQty = parseNumber(part.quantity);
+    const delta = parseNumber(deltaQuantity);
     const newQty = prevQty + delta;
 
     if (newQty < 0) {

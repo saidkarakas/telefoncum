@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { escapeHtml } from './security';
-import { authService } from '../db/services/authService';
 import { settingsService } from '../db/services/settingsService';
 
 describe('Security Utilities', () => {
@@ -30,15 +29,15 @@ describe('Settings Service Backup/Import Security', () => {
     });
   });
 
-  it('should validate schema during import and reject invalid JSON', () => {
-    expect(() => settingsService.importDatabase('invalid json')).toThrow();
-    expect(() => settingsService.importDatabase('[]')).toThrow();
+  it('should validate schema during import and reject invalid JSON', async () => {
+    await expect(settingsService.importDatabase('invalid json')).rejects.toThrow();
+    await expect(settingsService.importDatabase('[]')).rejects.toThrow();
   });
 
-  it('should prevent prototype pollution and throw error', () => {
+  it('should prevent prototype pollution and throw error', async () => {
     const maliciousPayload = '{"__proto__": {"polluted": true}, "tys_settings": "{}"}';
     
-    expect(() => settingsService.importDatabase(maliciousPayload)).toThrow(/Prototype Pollution denemesi engellendi/);
+    await expect(settingsService.importDatabase(maliciousPayload)).rejects.toThrow(/Prototype Pollution denemesi engellendi/);
     expect({}.polluted).toBeUndefined();
   });
 

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { initDb } from './db/services/shared';
+import { initDb, mergeCollections, flushPendingSync, getJson, STORAGE_KEYS } from './db/services/shared';
 import { authService } from './db/services/authService';
 import { supabase, isSupabaseConfigured } from './db/supabaseClient';
 
@@ -26,8 +26,6 @@ export default function App() {
   // Phone Detail Modal State
   const [selectedPhoneId, setSelectedPhoneId] = useState(null);
   const [openPhoneDetail, setOpenPhoneDetail] = useState(false);
-
-
 
   // Initialize DB and Check Authentication
   useEffect(() => {
@@ -69,7 +67,7 @@ export default function App() {
     };
   }, []);
 
-  // Supabase Cloud Synchronisation Polling Loop
+  // Supabase Cloud Synchronisation & Merge Logic (Requirement 10)
   useEffect(() => {
     if (!isSupabaseConfigured) return;
 
@@ -78,6 +76,9 @@ export default function App() {
         const { data: authData } = await supabase.auth.getUser();
         const owner_id = authData?.user?.id;
         if (!owner_id) return;
+
+        // Requirement 10: Flush offline queue when online
+        await flushPendingSync();
 
         const { data, error } = await supabase
           .from('tys_data')
@@ -92,11 +93,26 @@ export default function App() {
         if (data && data.length > 0) {
           let updated = false;
           data.forEach(row => {
-            const localVal = localStorage.getItem(row.key);
-            const remoteValStr = JSON.stringify(row.value);
-            if (localVal !== remoteValStr) {
-              localStorage.setItem(row.key, remoteValStr);
-              updated = true;
+            if (row.key === STORAGE_KEYS.AUTH || row.key === STORAGE_KEYS.PENDING_SYNC) return;
+
+            const localVal = getJson(row.key, []);
+            const remoteVal = row.value;
+
+            if (Array.isArray(localVal) && Array.isArray(remoteVal)) {
+              // Requirement 10: Safe Merge by ID and updatedAt (latest wins)
+              const merged = mergeCollections(localVal, remoteVal);
+              const mergedStr = JSON.stringify(merged);
+              if (JSON.stringify(localVal) !== mergedStr) {
+                localStorage.setItem(row.key, mergedStr);
+                updated = true;
+              }
+            } else {
+              const localValStr = localStorage.getItem(row.key);
+              const remoteValStr = JSON.stringify(remoteVal);
+              if (localValStr !== remoteValStr) {
+                localStorage.setItem(row.key, remoteValStr);
+                updated = true;
+              }
             }
           });
           
@@ -112,23 +128,28 @@ export default function App() {
     // Initial pull
     pullFromCloud();
 
+    // Re-sync on internet reconnection
+    const handleOnline = () => {
+      pullFromCloud();
+    };
+    window.addEventListener('online', handleOnline);
+
     // Supabase Realtime Subscription
     let subscription;
     if (isSupabaseConfigured) {
       subscription = supabase
         .channel('public:tys_data')
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'tys_data' }, (payload) => {
-          // When a change is detected in DB, pull fresh data
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'tys_data' }, () => {
           pullFromCloud();
         })
         .subscribe();
     }
 
-    // Fallback polling just in case websocket disconnects
     const interval = setInterval(pullFromCloud, 30000);
 
     return () => {
       clearInterval(interval);
+      window.removeEventListener('online', handleOnline);
       if (subscription) {
         supabase.removeChannel(subscription);
       }
@@ -197,8 +218,6 @@ export default function App() {
     return <Login onLoginSuccess={handleLoginSuccess} />;
   }
 
-
-
   // Authenticated Layout
   return (
     <Layout 
@@ -216,7 +235,6 @@ export default function App() {
           phoneId={selectedPhoneId} 
           onClose={() => setOpenPhoneDetail(false)}
           onDataChanged={() => {
-            // Force active page reloading by quickly toggling page trigger or using reload callbacks
             const current = activePage;
             setActivePage('');
             setTimeout(() => setActivePage(current), 10);

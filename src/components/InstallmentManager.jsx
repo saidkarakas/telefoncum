@@ -6,12 +6,16 @@ import {
   Printer,
   X,
   CheckCircle2,
-  Calendar,
-  UserCheck
+  Users,
+  Building2,
+  DollarSign
 } from 'lucide-react';
 import { installmentService } from '../db/services/installmentService';
 import { customerService } from '../db/services/customerService';
 import { supplierService } from '../db/services/supplierService';
+import { transactionService } from '../db/services/transactionService';
+import { cashMovementService } from '../db/services/cashMovementService';
+import { mapPaymentMethod } from '../db/services/installmentService';
 import { escapeHtml } from '../utils/security';
 
 export default function InstallmentManager({ setActivePage, setSelectedContactId }) {
@@ -20,13 +24,14 @@ export default function InstallmentManager({ setActivePage, setSelectedContactId
   const [suppliers, setSuppliers] = useState([]);
   
   const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState('ALL');
+  const [statusFilter, setStatusFilter] = useState('ALL'); // ALL, INSTALMENT, VERESIYE, OVERDUE, SUPPLIER
   const [dateFilter, setDateFilter] = useState('ALL'); // ALL, OVERDUE, TODAY, THIS_MONTH
 
-  // Pay Modal
+  // Pay Modal for Installment or Veresiye
   const [isPayOpen, setIsPayOpen] = useState(false);
   const [payPlan, setPayPlan] = useState(null);
   const [payInst, setPayInst] = useState(null);
+  const [payContact, setPayContact] = useState(null);
   const [payAmount, setPayAmount] = useState('');
   const [payType, setPayType] = useState('Nakit');
   const [payNote, setPayNote] = useState('');
@@ -58,17 +63,27 @@ export default function InstallmentManager({ setActivePage, setSelectedContactId
   const getContactInfo = (contactId, contactType) => {
     if (contactType === 'supplier') {
       const supp = suppliers.find(s => s.id === contactId);
-      return supp ? { name: supp.name, phone: supp.phone, typeLabel: 'Tedarikçi' } : { name: 'Bilinmeyen Tedarikçi', phone: '', typeLabel: 'Tedarikçi' };
+      return supp ? { name: supp.fullName || supp.name, phone: supp.phone, typeLabel: 'Tedarikçi', debt: supp.debt } : { name: 'Bilinmeyen Tedarikçi', phone: '', typeLabel: 'Tedarikçi', debt: 0 };
     }
     const cust = customers.find(c => c.id === contactId);
-    return cust ? { name: cust.name, phone: cust.phone, typeLabel: 'Müşteri' } : { name: 'Bilinmeyen Müşteri', phone: '', typeLabel: 'Müşteri' };
+    return cust ? { name: cust.fullName || cust.name, phone: cust.phone, typeLabel: 'Müşteri', debt: cust.debt } : { name: 'Bilinmeyen Müşteri', phone: '', typeLabel: 'Müşteri', debt: 0 };
   };
+
+  // Build Veresiye / Non-installment debt list for customers without active installment plans
+  const veresiyeCustomers = customers.filter(c => {
+    if ((c.debt || 0) <= 0) return false;
+    const hasActiveInstallment = plans.some(p => p.contactId === c.id && p.status !== 'Tamamlandı');
+    return !hasActiveInstallment;
+  });
+
+  const activeSupplierPayables = suppliers.filter(s => (s.debt || 0) > 0);
 
   // Filter Plans
   const todayStr = new Date().toISOString().split('T')[0];
   const currentMonthKey = todayStr.substring(0, 7);
 
   const filteredPlans = plans.filter(plan => {
+    if (statusFilter === 'VERESIYE' || statusFilter === 'SUPPLIER') return false;
     const contact = getContactInfo(plan.contactId, plan.contactType);
     const matchesSearch = !searchQuery || (
       contact.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -77,8 +92,10 @@ export default function InstallmentManager({ setActivePage, setSelectedContactId
     );
 
     let matchesStatus = true;
-    if (statusFilter !== 'ALL') {
-      matchesStatus = plan.status === statusFilter;
+    if (statusFilter === 'OVERDUE') {
+      matchesStatus = plan.status === 'Gecikmiş';
+    } else if (statusFilter === 'INSTALMENT') {
+      matchesStatus = true;
     }
 
     let matchesDate = true;
@@ -122,7 +139,19 @@ export default function InstallmentManager({ setActivePage, setSelectedContactId
   const handleOpenPay = (plan, installment) => {
     setPayPlan(plan);
     setPayInst(installment);
+    setPayContact(null);
     setPayAmount(installment.remainingAmount);
+    setPayType('Nakit');
+    setPayNote('');
+    setErrorMsg('');
+    setIsPayOpen(true);
+  };
+
+  const handleOpenVeresiyePay = (contact, type = 'customer') => {
+    setPayPlan(null);
+    setPayInst(null);
+    setPayContact({ ...contact, type });
+    setPayAmount(contact.debt);
     setPayType('Nakit');
     setPayNote('');
     setErrorMsg('');
@@ -131,22 +160,56 @@ export default function InstallmentManager({ setActivePage, setSelectedContactId
 
   const handlePaySubmit = async (e) => {
     e.preventDefault();
-    if (isSubmitting || !payPlan || !payInst) return;
+    if (isSubmitting) return;
 
     try {
       setIsSubmitting(true);
       setErrorMsg('');
-      
-      await installmentService.payInstallment(
-        payPlan.id,
-        payInst.id,
-        payAmount,
-        payType,
-        payNote
-      );
+
+      if (payPlan && payInst) {
+        await installmentService.payInstallment(
+          payPlan.id,
+          payInst.id,
+          payAmount,
+          payType,
+          payNote
+        );
+        setSuccessMsg(`Taksit #${payInst.installmentNo} ödemesi kaydedildi.`);
+      } else if (payContact) {
+        const amount = Number(payAmount);
+        if (amount <= 0) throw new Error("Geçerli bir ödeme tutarı giriniz.");
+
+        const isSupplier = payContact.type === 'supplier';
+        const txType = isSupplier ? 'payment' : 'collection';
+        const opId = `veresiye-${Date.now()}`;
+
+        await transactionService.save({
+          contactId: payContact.id,
+          contactType: payContact.type,
+          type: txType,
+          amount,
+          date: todayStr,
+          sourceType: 'veresiye_payment',
+          sourceId: payContact.id,
+          operationId: opId,
+          description: `${isSupplier ? 'Tedarikçi Ödemesi' : 'Veresiye Tahsilatı'} (${payType}${payNote ? ' - ' + payNote : ''})`
+        });
+
+        await cashMovementService.save({
+          operationId: `${opId}-cash`,
+          direction: isSupplier ? 'out' : 'in',
+          paymentMethod: mapPaymentMethod(payType),
+          amount,
+          sourceType: 'veresiye_payment',
+          sourceId: payContact.id,
+          description: `${isSupplier ? 'Tedarikçi Borç Ödemesi' : 'Veresiye Tahsilatı'} - ${payContact.fullName || payContact.name}`,
+          date: todayStr
+        });
+
+        setSuccessMsg(`${isSupplier ? 'Tedarikçi ödemesi' : 'Veresiye tahsilatı'} başarıyla kaydedildi.`);
+      }
 
       setIsPayOpen(false);
-      setSuccessMsg(`Taksit #${payInst.installmentNo} ödemesi kaydedildi.`);
       loadData();
       setTimeout(() => setSuccessMsg(''), 3000);
     } catch (err) {
@@ -255,7 +318,7 @@ export default function InstallmentManager({ setActivePage, setSelectedContactId
             Taksit & Veresiye Yönetimi
           </h2>
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            Açık alacakları, taksitli satış sözleşmelerini ve geciken ödemeleri takip edin.
+            Açık alacakları, taksitli satış sözleşmelerini ve veresiyeleri takip edin.
           </p>
         </div>
       </div>
@@ -278,7 +341,7 @@ export default function InstallmentManager({ setActivePage, setSelectedContactId
         </div>
 
         <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm">
-          <div className="text-xs text-slate-500 dark:text-slate-400 mb-1">Toplam İşletme Borcu</div>
+          <div className="text-xs text-slate-500 dark:text-slate-400 mb-1">Tedarikçi Borçları</div>
           <div className="text-xl font-bold font-display text-rose-500">
             {totalSupplierPayables.toLocaleString('tr-TR')} TL
           </div>
@@ -313,7 +376,7 @@ export default function InstallmentManager({ setActivePage, setSelectedContactId
         </div>
       </div>
 
-      {/* Filter & Search Bar */}
+      {/* Filter & Search Bar (Requirement 15) */}
       <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex flex-col md:flex-row gap-3">
         <div className="relative flex-1">
           <Search size={16} className="absolute left-3 top-3 text-slate-400" />
@@ -321,10 +384,22 @@ export default function InstallmentManager({ setActivePage, setSelectedContactId
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Müşteri adı, telefon numarası veya not ara..."
+            placeholder="Müşteri/Tedarikçi adı, telefon numarası veya not ara..."
             className="w-full pl-9 pr-4 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-xs font-mono text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-teal-500"
           />
         </div>
+
+        <select
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value)}
+          className="px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-xs font-bold text-slate-800 dark:text-white focus:outline-none focus:ring-1 focus:ring-teal-500"
+        >
+          <option value="ALL">Tümü (Taksit + Veresiye + Borçlar)</option>
+          <option value="INSTALMENT">Taksitli Borçlar</option>
+          <option value="VERESIYE">Veresiyeler (Açık Müşteri Alacakları)</option>
+          <option value="OVERDUE">Gecikmiş Taksitler</option>
+          <option value="SUPPLIER">Tedarikçi Borçları</option>
+        </select>
 
         <select
           value={dateFilter}
@@ -336,167 +411,218 @@ export default function InstallmentManager({ setActivePage, setSelectedContactId
           <option value="TODAY">Bugün Vadesi Gelenler</option>
           <option value="THIS_MONTH">Bu Ay Vadesi Gelenler</option>
         </select>
-
-        <select
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-          className="px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-xs text-slate-800 dark:text-white focus:outline-none focus:ring-1 focus:ring-teal-500"
-        >
-          <option value="ALL">Tüm Durumlar</option>
-          <option value="Bekliyor">Bekliyor</option>
-          <option value="Kısmi Ödendi">Kısmi Ödendi</option>
-          <option value="Gecikmiş">Gecikmiş</option>
-          <option value="Tamamlandı">Tamamlandı</option>
-        </select>
       </div>
 
-      {/* Plans List */}
-      <div className="space-y-4">
-        {filteredPlans.length === 0 ? (
-          <div className="p-12 text-center bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl text-slate-500 text-xs">
-            Aranan kriterlere uygun taksit planı bulunamadı.
-          </div>
-        ) : (
-          filteredPlans.map(plan => {
-            const contact = getContactInfo(plan.contactId, plan.contactType);
-            const isCompleted = plan.status === 'Tamamlandı';
-            const isOverdue = plan.status === 'Gecikmiş';
-
-            return (
-              <div
-                key={plan.id}
-                className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm space-y-4"
-              >
-                {/* Plan Header */}
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-3">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="font-bold text-sm text-slate-900 dark:text-white">{contact.name}</span>
-                      <span className="text-[10px] px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-500 font-semibold">
-                        {contact.typeLabel}
-                      </span>
-                      {contact.phone && (
-                        <span className="text-xs text-slate-400 font-mono">({contact.phone})</span>
-                      )}
-                    </div>
-                    {plan.note && <p className="text-xs text-slate-500 mt-0.5">{plan.note}</p>}
-                  </div>
-
-                  <div className="flex items-center gap-3">
-                    <span className={`px-3 py-1 rounded-xl text-xs font-bold ${
-                      isCompleted 
-                        ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400'
-                        : isOverdue 
-                        ? 'bg-rose-500/20 text-rose-600 dark:text-rose-400' 
-                        : 'bg-amber-500/20 text-amber-600 dark:text-amber-400'
-                    }`}>
-                      {plan.status}
-                    </span>
-
-                    <button
-                      onClick={() => handleOpenDetail(plan)}
-                      className="p-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 text-xs font-semibold flex items-center gap-1 cursor-pointer"
-                    >
-                      <Printer size={14} />
-                      Yazdır / Detay
-                    </button>
-                  </div>
+      {/* Non-installment Veresiye Customer Section (Requirement 15) */}
+      {(statusFilter === 'ALL' || statusFilter === 'VERESIYE') && veresiyeCustomers.length > 0 && (
+        <div className="space-y-3">
+          <h3 className="text-sm font-bold text-amber-600 dark:text-amber-400 flex items-center gap-2">
+            <Users size={18} /> Veresiye & Açık Müşteri Alacakları ({veresiyeCustomers.length} Müşteri)
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {veresiyeCustomers.map(cust => (
+              <div key={cust.id} className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex justify-between items-center">
+                <div>
+                  <div className="font-bold text-sm text-slate-900 dark:text-white">{cust.fullName || cust.name}</div>
+                  <div className="text-xs text-slate-500">{cust.phone || 'Telefon Yok'}</div>
+                  <div className="text-[11px] text-amber-600 font-semibold mt-1">Açık Veresiye Borcu</div>
                 </div>
-
-                {/* Plan Summary Numbers */}
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs bg-slate-50 dark:bg-slate-950 p-3 rounded-xl">
-                  <div>
-                    <span className="text-slate-400 block text-[10px]">Toplam Satış Bedeli</span>
-                    <span className="font-bold font-mono text-slate-900 dark:text-white">
-                      {Number(plan.totalAmount).toLocaleString('tr-TR')} TL
-                    </span>
-                  </div>
-
-                  <div>
-                    <span className="text-slate-400 block text-[10px]">Alınan Peşinat</span>
-                    <span className="font-bold font-mono text-emerald-600 dark:text-emerald-400">
-                      {Number(plan.downPayment || 0).toLocaleString('tr-TR')} TL
-                    </span>
-                  </div>
-
-                  <div>
-                    <span className="text-slate-400 block text-[10px]">Kalan Borç Tutarı</span>
-                    <span className="font-bold font-mono text-rose-500">
-                      {Number(plan.remainingAmount).toLocaleString('tr-TR')} TL
-                    </span>
-                  </div>
-
-                  <div>
-                    <span className="text-slate-400 block text-[10px]">Taksit Adedi / Vade</span>
-                    <span className="font-semibold text-slate-700 dark:text-slate-300">
-                      {plan.installmentCount} Ay Taksit
-                    </span>
-                  </div>
-                </div>
-
-                {/* Schedule Items Table Preview */}
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs">
-                    <thead className="text-[10px] text-slate-400 uppercase border-b border-slate-200 dark:border-slate-800">
-                      <tr>
-                        <th className="py-2">Taksit No</th>
-                        <th className="py-2">Vade Tarihi</th>
-                        <th className="py-2">Tutar</th>
-                        <th className="py-2">Ödenen</th>
-                        <th className="py-2">Kalan</th>
-                        <th className="py-2">Durum</th>
-                        <th className="py-2 text-right">İşlem</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800/50">
-                      {(plan.schedule || []).map(inst => (
-                        <tr key={inst.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-850/50">
-                          <td className="py-2 font-bold font-mono text-slate-900 dark:text-white">#{inst.installmentNo}</td>
-                          <td className="py-2 font-mono">{new Date(inst.dueDate).toLocaleDateString('tr-TR')}</td>
-                          <td className="py-2 font-mono">{Number(inst.amount).toLocaleString('tr-TR')} TL</td>
-                          <td className="py-2 font-mono text-emerald-600">{Number(inst.paidAmount).toLocaleString('tr-TR')} TL</td>
-                          <td className="py-2 font-mono font-bold text-rose-500">{Number(inst.remainingAmount).toLocaleString('tr-TR')} TL</td>
-                          <td className="py-2">
-                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                              inst.status === 'Ödendi'
-                                ? 'bg-emerald-500/10 text-emerald-500'
-                                : inst.status === 'Gecikmiş'
-                                ? 'bg-rose-500/10 text-rose-500'
-                                : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
-                            }`}>
-                              {inst.status}
-                            </span>
-                          </td>
-                          <td className="py-2 text-right">
-                            {inst.remainingAmount > 0 && (
-                              <button
-                                onClick={() => handleOpenPay(plan, inst)}
-                                className="px-3 py-1 rounded-lg bg-teal-500 text-slate-950 font-bold hover:bg-teal-400 transition text-[11px] cursor-pointer"
-                              >
-                                Ödeme Al
-                              </button>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                <div className="text-right">
+                  <div className="text-base font-bold font-mono text-teal-600">{cust.debt.toLocaleString('tr-TR')} TL</div>
+                  <button
+                    onClick={() => handleOpenVeresiyePay(cust, 'customer')}
+                    className="mt-2 px-3 py-1 bg-teal-500 hover:bg-teal-400 text-slate-950 text-xs font-bold rounded-lg cursor-pointer"
+                  >
+                    Tahsilat Al
+                  </button>
                 </div>
               </div>
-            );
-          })
-        )}
-      </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Supplier Payables Section (Requirement 15) */}
+      {(statusFilter === 'ALL' || statusFilter === 'SUPPLIER') && activeSupplierPayables.length > 0 && (
+        <div className="space-y-3">
+          <h3 className="text-sm font-bold text-rose-600 dark:text-rose-400 flex items-center gap-2">
+            <Building2 size={18} /> Tedarikçi Borçlarımız ({activeSupplierPayables.length} Tedarikçi)
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {activeSupplierPayables.map(supp => (
+              <div key={supp.id} className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex justify-between items-center">
+                <div>
+                  <div className="font-bold text-sm text-slate-900 dark:text-white">{supp.fullName || supp.name}</div>
+                  <div className="text-xs text-slate-500">{supp.phone || 'Telefon Yok'}</div>
+                  <div className="text-[11px] text-rose-500 font-semibold mt-1">Ödenecek Tedarikçi Borcu</div>
+                </div>
+                <div className="text-right">
+                  <div className="text-base font-bold font-mono text-rose-500">{supp.debt.toLocaleString('tr-TR')} TL</div>
+                  <button
+                    onClick={() => handleOpenVeresiyePay(supp, 'supplier')}
+                    className="mt-2 px-3 py-1 bg-rose-500 hover:bg-rose-600 text-white text-xs font-bold rounded-lg cursor-pointer"
+                  >
+                    Ödeme Yap
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Plans List */}
+      {(statusFilter === 'ALL' || statusFilter === 'INSTALMENT' || statusFilter === 'OVERDUE') && (
+        <div className="space-y-4">
+          <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+            <CreditCard size={18} className="text-teal-500" /> Taksit Planları Listesi
+          </h3>
+          {filteredPlans.length === 0 ? (
+            <div className="p-12 text-center bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl text-slate-500 text-xs">
+              Aranan kriterlere uygun taksit planı bulunamadı.
+            </div>
+          ) : (
+            filteredPlans.map(plan => {
+              const contact = getContactInfo(plan.contactId, plan.contactType);
+              const isCompleted = plan.status === 'Tamamlandı';
+              const isOverdue = plan.status === 'Gecikmiş';
+
+              return (
+                <div
+                  key={plan.id}
+                  className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm space-y-4"
+                >
+                  {/* Plan Header */}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-3">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-sm text-slate-900 dark:text-white">{contact.name}</span>
+                        <span className="text-[10px] px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-500 font-semibold">
+                          {contact.typeLabel}
+                        </span>
+                        {contact.phone && (
+                          <span className="text-xs text-slate-400 font-mono">({contact.phone})</span>
+                        )}
+                      </div>
+                      {plan.note && <p className="text-xs text-slate-500 mt-0.5">{plan.note}</p>}
+                    </div>
+
+                    <div className="flex items-center gap-3">
+                      <span className={`px-3 py-1 rounded-xl text-xs font-bold ${
+                        isCompleted 
+                          ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400'
+                          : isOverdue 
+                          ? 'bg-rose-500/20 text-rose-600 dark:text-rose-400' 
+                          : 'bg-amber-500/20 text-amber-600 dark:text-amber-400'
+                      }`}>
+                        {plan.status}
+                      </span>
+
+                      <button
+                        onClick={() => handleOpenDetail(plan)}
+                        className="p-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 text-xs font-semibold flex items-center gap-1 cursor-pointer"
+                      >
+                        <Printer size={14} />
+                        Yazdır / Detay
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Plan Summary Numbers */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs bg-slate-50 dark:bg-slate-950 p-3 rounded-xl">
+                    <div>
+                      <span className="text-slate-400 block text-[10px]">Toplam Satış Bedeli</span>
+                      <span className="font-bold font-mono text-slate-900 dark:text-white">
+                        {Number(plan.totalAmount).toLocaleString('tr-TR')} TL
+                      </span>
+                    </div>
+
+                    <div>
+                      <span className="text-slate-400 block text-[10px]">Alınan Peşinat</span>
+                      <span className="font-bold font-mono text-emerald-600 dark:text-emerald-400">
+                        {Number(plan.downPayment || 0).toLocaleString('tr-TR')} TL
+                      </span>
+                    </div>
+
+                    <div>
+                      <span className="text-slate-400 block text-[10px]">Kalan Borç Tutarı</span>
+                      <span className="font-bold font-mono text-rose-500">
+                        {Number(plan.remainingAmount).toLocaleString('tr-TR')} TL
+                      </span>
+                    </div>
+
+                    <div>
+                      <span className="text-slate-400 block text-[10px]">Taksit Adedi / Vade</span>
+                      <span className="font-semibold text-slate-700 dark:text-slate-300">
+                        {plan.installmentCount} Ay Taksit
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Schedule Items Table Preview */}
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead className="text-[10px] text-slate-400 uppercase border-b border-slate-200 dark:border-slate-800">
+                        <tr>
+                          <th className="py-2">Taksit No</th>
+                          <th className="py-2">Vade Tarihi</th>
+                          <th className="py-2">Tutar</th>
+                          <th className="py-2">Ödenen</th>
+                          <th className="py-2">Kalan</th>
+                          <th className="py-2">Durum</th>
+                          <th className="py-2 text-right">İşlem</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 dark:divide-slate-800/50">
+                        {(plan.schedule || []).map(inst => (
+                          <tr key={inst.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-850/50">
+                            <td className="py-2 font-bold font-mono text-slate-900 dark:text-white">#{inst.installmentNo}</td>
+                            <td className="py-2 font-mono">{new Date(inst.dueDate).toLocaleDateString('tr-TR')}</td>
+                            <td className="py-2 font-mono">{Number(inst.amount).toLocaleString('tr-TR')} TL</td>
+                            <td className="py-2 font-mono text-emerald-600">{Number(inst.paidAmount).toLocaleString('tr-TR')} TL</td>
+                            <td className="py-2 font-mono font-bold text-rose-500">{Number(inst.remainingAmount).toLocaleString('tr-TR')} TL</td>
+                            <td className="py-2">
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                inst.status === 'Ödendi'
+                                  ? 'bg-emerald-500/10 text-emerald-500'
+                                  : inst.status === 'Gecikmiş'
+                                  ? 'bg-rose-500/10 text-rose-500'
+                                  : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
+                              }`}>
+                                {inst.status}
+                              </span>
+                            </td>
+                            <td className="py-2 text-right">
+                              {inst.remainingAmount > 0 && (
+                                <button
+                                  onClick={() => handleOpenPay(plan, inst)}
+                                  className="px-3 py-1 rounded-lg bg-teal-500 text-slate-950 font-bold hover:bg-teal-400 transition text-[11px] cursor-pointer"
+                                >
+                                  Ödeme Al
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+      )}
 
       {/* MODAL 1: MAKE PAYMENT */}
-      {isPayOpen && payPlan && payInst && (
+      {isPayOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm">
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl w-full max-w-md p-6 shadow-2xl space-y-4">
             <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3">
               <h3 className="font-bold font-display text-base text-slate-900 dark:text-white">
-                Taksit Ödemesi Al (#Taksit {payInst.installmentNo})
+                {payPlan ? `Taksit Ödemesi Al (#Taksit ${payInst.installmentNo})` : payContact?.type === 'supplier' ? 'Tedarikçiye Ödeme Yap' : 'Veresiye Tahsilatı Al'}
               </h3>
-              <button onClick={() => setIsPayOpen(false)} className="text-slate-400 hover:text-white">
+              <button onClick={() => setIsPayOpen(false)} className="text-slate-400 hover:text-white cursor-pointer">
                 <X size={18} />
               </button>
             </div>
@@ -509,8 +635,18 @@ export default function InstallmentManager({ setActivePage, setSelectedContactId
 
             <form onSubmit={handlePaySubmit} className="space-y-4 text-xs">
               <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950 space-y-1">
-                <div className="text-slate-400">Kalan Taksit Borcu: <strong className="text-rose-500 font-mono">{payInst.remainingAmount} TL</strong></div>
-                <div className="text-slate-400">Vade Tarihi: <strong className="text-slate-800 dark:text-slate-200">{new Date(payInst.dueDate).toLocaleDateString('tr-TR')}</strong></div>
+                {payInst && (
+                  <>
+                    <div className="text-slate-400">Kalan Taksit Borcu: <strong className="text-rose-500 font-mono">{payInst.remainingAmount} TL</strong></div>
+                    <div className="text-slate-400">Vade Tarihi: <strong className="text-slate-800 dark:text-slate-200">{new Date(payInst.dueDate).toLocaleDateString('tr-TR')}</strong></div>
+                  </>
+                )}
+                {payContact && (
+                  <>
+                    <div className="text-slate-400">Kişi / Firma: <strong className="text-slate-900 dark:text-white font-bold">{payContact.fullName || payContact.name}</strong></div>
+                    <div className="text-slate-400">Mevcut Bakiye Borcu: <strong className="text-rose-500 font-mono">{payContact.debt} TL</strong></div>
+                  </>
+                )}
               </div>
 
               <div>
@@ -518,7 +654,6 @@ export default function InstallmentManager({ setActivePage, setSelectedContactId
                 <input
                   type="number"
                   min="0.01"
-                  max={payInst.remainingAmount}
                   step="0.01"
                   required
                   value={payAmount}
@@ -532,7 +667,7 @@ export default function InstallmentManager({ setActivePage, setSelectedContactId
                 <select
                   value={payType}
                   onChange={(e) => setPayType(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white font-bold"
                 >
                   <option value="Nakit">Nakit</option>
                   <option value="Havale/EFT">Havale / EFT</option>
@@ -583,7 +718,7 @@ export default function InstallmentManager({ setActivePage, setSelectedContactId
                 </h3>
                 <p className="text-xs text-slate-500">Plan ID: {detailPlan.id}</p>
               </div>
-              <button onClick={() => setIsDetailOpen(false)} className="text-slate-400 hover:text-white">
+              <button onClick={() => setIsDetailOpen(false)} className="text-slate-400 hover:text-white cursor-pointer">
                 <X size={18} />
               </button>
             </div>

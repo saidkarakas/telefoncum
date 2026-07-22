@@ -1,4 +1,4 @@
-import { STORAGE_KEYS, getJson, safeNumber, round2 } from './shared';
+import { STORAGE_KEYS, getJson, parseNumber, round2 } from './shared';
 import { phoneService } from './phoneService';
 import { repairService } from './repairService';
 import { expenseService } from './expenseService';
@@ -7,6 +7,7 @@ import { tradeInService } from './tradeInService';
 import { partService } from './partService';
 import { customerService } from './customerService';
 import { supplierService } from './supplierService';
+import { cashMovementService } from './cashMovementService';
 
 export const reportService = {
   getDashboardData: () => {
@@ -96,6 +97,7 @@ export const reportService = {
     const customers = customerService.getAll();
     const suppliers = supplierService.getAll();
     const transactions = getJson(STORAGE_KEYS.TRANSACTIONS, []);
+    const cashMovements = cashMovementService.getAll();
 
     const totalPurchaseValue = phones.reduce((sum, p) => sum + p.purchasePrice, 0);
     const totalSalesValue = phones.filter(p => p.status === 'Satıldı').reduce((sum, p) => sum + p.salesPrice, 0);
@@ -111,18 +113,18 @@ export const reportService = {
 
     // 1. Trade-in Metrics
     const tradeCount = tradeIns.length;
-    const tradeReceivedValue = tradeIns.reduce((sum, t) => sum + safeNumber(t.receivedPhoneValue), 0);
-    const tradeCollectedDiff = tradeIns.reduce((sum, t) => sum + safeNumber(t.paidAmount), 0);
+    const tradeReceivedValue = tradeIns.reduce((sum, t) => sum + parseNumber(t.receivedPhoneValue), 0);
+    const tradeCollectedDiff = tradeIns.reduce((sum, t) => sum + parseNumber(t.paidAmount), 0);
     const tradeCustomerReceivables = tradeIns
       .filter(t => t.differenceDirection === 'customer_owes')
-      .reduce((sum, t) => sum + safeNumber(t.remainingAmount), 0);
+      .reduce((sum, t) => sum + parseNumber(t.remainingAmount), 0);
     const tradeBusinessPayables = tradeIns
       .filter(t => t.differenceDirection === 'business_owes')
-      .reduce((sum, t) => sum + safeNumber(t.remainingAmount), 0);
+      .reduce((sum, t) => sum + parseNumber(t.remainingAmount), 0);
 
     // 2. Installment & Receivables Metrics
-    const totalCustomerReceivables = customers.reduce((sum, c) => sum + safeNumber(c.debt), 0);
-    const totalSupplierPayables = suppliers.reduce((sum, s) => sum + safeNumber(s.debt), 0);
+    const totalCustomerReceivables = customers.reduce((sum, c) => sum + parseNumber(c.debt), 0);
+    const totalSupplierPayables = suppliers.reduce((sum, s) => sum + parseNumber(s.debt), 0);
     
     let totalOverdueReceivables = 0;
     let upcomingInstallmentsTotal = 0;
@@ -130,7 +132,7 @@ export const reportService = {
 
     const monthlyCollections = transactions
       .filter(t => (t.type === 'collection' || t.type === 'tahsilat') && (t.date || '').startsWith(currentMonthKey))
-      .reduce((sum, t) => sum + safeNumber(t.amount), 0);
+      .reduce((sum, t) => sum + parseNumber(t.amount), 0);
 
     installments.forEach(plan => {
       (plan.schedule || []).forEach(item => {
@@ -142,9 +144,14 @@ export const reportService = {
       });
     });
 
-    // 3. Parts Stock Metrics
-    const partsTotalPurchaseCost = parts.reduce((sum, p) => sum + (safeNumber(p.quantity) * safeNumber(p.purchasePrice)), 0);
-    const partsTotalPotentialSale = parts.reduce((sum, p) => sum + (safeNumber(p.quantity) * safeNumber(p.salePrice)), 0);
+    // 3. Cash Movements Summary (Requirement 8)
+    const totalCashIn = cashMovements.filter(m => m.direction === 'in').reduce((sum, m) => sum + parseNumber(m.amount), 0);
+    const totalCashOut = cashMovements.filter(m => m.direction === 'out').reduce((sum, m) => sum + parseNumber(m.amount), 0);
+    const netCashBalance = round2(totalCashIn - totalCashOut);
+
+    // 4. Parts Stock Metrics
+    const partsTotalPurchaseCost = parts.reduce((sum, p) => sum + (parseNumber(p.quantity) * parseNumber(p.purchasePrice)), 0);
+    const partsTotalPotentialSale = parts.reduce((sum, p) => sum + (parseNumber(p.quantity) * parseNumber(p.salePrice)), 0);
     const criticalPartsList = parts.filter(p => p.quantity <= (p.minQuantity || 0));
 
     let repairPartsCostTotal = 0;
@@ -152,9 +159,9 @@ export const reportService = {
     let repairLaborIncomeTotal = 0;
 
     repairs.forEach(r => {
-      repairPartsCostTotal += safeNumber(r.partsCostTotal || 0);
-      repairPartsSaleTotal += safeNumber(r.partsSaleTotal || 0);
-      repairLaborIncomeTotal += safeNumber(r.laborFee || 0);
+      repairPartsCostTotal += parseNumber(r.partsCostTotal || 0);
+      repairPartsSaleTotal += parseNumber(r.partsSaleTotal || 0);
+      repairLaborIncomeTotal += parseNumber(r.laborFee || 0);
     });
 
     const repairPartsProfit = round2(repairPartsSaleTotal - repairPartsCostTotal);
@@ -225,7 +232,12 @@ export const reportService = {
       topModel: topModelCount > 0 ? `${topModel} (${topModelCount} Adet)` : 'Satış Yok',
       monthlySales: monthlySalesArray,
 
-      // New Report Sections
+      cash: {
+        totalCashIn: round2(totalCashIn),
+        totalCashOut: round2(totalCashOut),
+        netCashBalance
+      },
+
       trade: {
         tradeCount,
         tradeReceivedValue: round2(tradeReceivedValue),

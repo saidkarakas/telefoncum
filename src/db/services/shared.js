@@ -13,11 +13,13 @@ export const STORAGE_KEYS = {
   PARTS: 'tys_parts',
   STOCK_MOVEMENTS: 'tys_stock_movements',
   INSTALLMENTS: 'tys_installments',
-  TRADE_INS: 'tys_trade_ins'
+  TRADE_INS: 'tys_trade_ins',
+  CASH_MOVEMENTS: 'tys_cash_movements',
+  PENDING_SYNC: 'tys_pending_sync'
 };
 
 export const SECURITY_LIMITS = {
-  MAX_BACKUP_SIZE_BYTES: 5 * 1024 * 1024,
+  MAX_BACKUP_SIZE_BYTES: 10 * 1024 * 1024,
   MAX_OBJECT_DEPTH: 10,
   MAX_ARRAY_LENGTH: 10000,
   MAX_STRING_LENGTH: 500000,
@@ -36,16 +38,30 @@ export const generateUUID = () => {
   return 'id-' + Math.random().toString(36).substring(2, 11) + '-' + Date.now().toString(36);
 };
 
-// Helper: Safe Number Conversion with Non-Negative check and 2 Decimal Rounding
-export const safeNumber = (val, allowNegative = false) => {
+// Helper: Parse number with 2 decimal precision
+export const parseNumber = (val) => {
   if (val === null || val === undefined || val === '') return 0;
   const num = Number(val);
   if (isNaN(num)) return 0;
-  if (!allowNegative && num < 0) return 0;
   return Math.round((num + Number.EPSILON) * 100) / 100;
 };
 
-export const round2 = (val) => safeNumber(val, true);
+// Helper: Validate non-negative numbers explicitly
+export const validateNonNegative = (val, fieldName = 'Tutar') => {
+  const num = parseNumber(val);
+  if (num < 0) {
+    throw new Error(`${fieldName} negatif olamaz.`);
+  }
+  return num;
+};
+
+// Legacy safeNumber wrapper
+export const safeNumber = (val, allowNegative = false) => {
+  if (allowNegative) return parseNumber(val);
+  return validateNonNegative(val < 0 ? 0 : val);
+};
+
+export const round2 = (val) => parseNumber(val);
 
 // Helper: Get item from LocalStorage
 export const getJson = (key, defaultValue = []) => {
@@ -58,24 +74,99 @@ export const getJson = (key, defaultValue = []) => {
   }
 };
 
-// Helper: Sync data to Supabase in the background
+// Pending sync queue management
+export const addToPendingSync = (key) => {
+  const queue = getJson(STORAGE_KEYS.PENDING_SYNC, []);
+  if (!queue.includes(key)) {
+    queue.push(key);
+    localStorage.setItem(STORAGE_KEYS.PENDING_SYNC, JSON.stringify(queue));
+  }
+};
+
+export const removeFromPendingSync = (key) => {
+  const queue = getJson(STORAGE_KEYS.PENDING_SYNC, []);
+  const updated = queue.filter(k => k !== key);
+  localStorage.setItem(STORAGE_KEYS.PENDING_SYNC, JSON.stringify(updated));
+};
+
+// Helper: Sync data to Supabase with offline queue and retry
 export const syncToCloud = async (key, data) => {
-  if (!isSupabaseConfigured) return;
+  if (!isSupabaseConfigured) return false;
   try {
     const { data: authData } = await supabase.auth.getUser();
     const owner_id = authData?.user?.id;
-    if (!owner_id) return;
+    if (!owner_id) return false;
 
     const { error } = await supabase
       .from('tys_data')
-      .upsert({ key, value: data, updated_at: new Date().toISOString(), owner_id });
+      .upsert({ 
+        key, 
+        value: data, 
+        updated_at: new Date().toISOString(), 
+        owner_id 
+      });
     
     if (error) {
       console.error(`Supabase sync error for ${key}:`, error);
+      addToPendingSync(key);
+      return false;
+    } else {
+      removeFromPendingSync(key);
+      return true;
     }
   } catch (err) {
     console.error("Supabase sync network error:", err);
+    addToPendingSync(key);
+    return false;
   }
+};
+
+// Flush pending sync queue
+export const flushPendingSync = async () => {
+  if (!isSupabaseConfigured) return;
+  const queue = getJson(STORAGE_KEYS.PENDING_SYNC, []);
+  if (queue.length === 0) return;
+
+  for (const key of queue) {
+    const localData = getJson(key, null);
+    if (localData !== null) {
+      const success = await syncToCloud(key, localData);
+      if (!success) break; // Network still unavailable
+    }
+  }
+};
+
+// Safe Merge of Local and Remote collection data (Latest updatedAt wins)
+export const mergeCollections = (localItems = [], remoteItems = []) => {
+  if (!Array.isArray(localItems)) localItems = [];
+  if (!Array.isArray(remoteItems)) remoteItems = [];
+
+  const itemMap = new Map();
+
+  // Load local items first
+  localItems.forEach(item => {
+    if (item && item.id) {
+      itemMap.set(item.id, item);
+    }
+  });
+
+  // Merge remote items based on updatedAt timestamp
+  remoteItems.forEach(remoteItem => {
+    if (!remoteItem || !remoteItem.id) return;
+    
+    const localItem = itemMap.get(remoteItem.id);
+    if (!localItem) {
+      itemMap.set(remoteItem.id, remoteItem);
+    } else {
+      const localTime = new Date(localItem.updatedAt || localItem.createdAt || 0).getTime();
+      const remoteTime = new Date(remoteItem.updatedAt || remoteItem.createdAt || 0).getTime();
+      if (remoteTime > localTime) {
+        itemMap.set(remoteItem.id, remoteItem);
+      }
+    }
+  });
+
+  return Array.from(itemMap.values());
 };
 
 export const logAction = async (action, entityType, entityId, oldValue, newValue) => {
@@ -106,7 +197,7 @@ export const logAction = async (action, entityType, entityId, oldValue, newValue
     old_value: redact(oldValue),
     new_value: redact(newValue),
     created_at: new Date().toISOString(),
-    username: localSession.username
+    username: localSession.username || 'System'
   };
 
   localLogs.unshift(newLog);
@@ -137,18 +228,34 @@ export const logAction = async (action, entityType, entityId, oldValue, newValue
   }
 };
 
-// Helper: Save item to LocalStorage and trigger sync to cloud
+// Helper: Save item to LocalStorage with timestamp and trigger sync to cloud
 export const saveJson = async (key, data) => {
   const oldValue = getJson(key, null);
+
+  // Attach updatedAt to records if array
+  let preparedData = data;
+  const nowStr = new Date().toISOString();
+
+  if (Array.isArray(data) && key !== STORAGE_KEYS.AUDIT_LOG) {
+    preparedData = data.map(item => {
+      if (typeof item === 'object' && item !== null) {
+        return {
+          ...item,
+          updatedAt: item.updatedAt || nowStr
+        };
+      }
+      return item;
+    });
+  }
   
-  if (key !== STORAGE_KEYS.AUDIT_LOG && key !== STORAGE_KEYS.AUTH && Array.isArray(data) && Array.isArray(oldValue)) {
-    const added = data.filter(n => !oldValue.find(o => o && o.id === n.id));
+  if (key !== STORAGE_KEYS.AUDIT_LOG && key !== STORAGE_KEYS.AUTH && Array.isArray(preparedData) && Array.isArray(oldValue)) {
+    const added = preparedData.filter(n => !oldValue.find(o => o && o.id === n.id));
     added.forEach(item => logAction('CREATE', key, item.id, null, item));
     
-    const deleted = oldValue.filter(o => o && !data.find(n => n.id === o.id));
+    const deleted = oldValue.filter(o => o && !preparedData.find(n => n.id === o.id));
     deleted.forEach(item => logAction('DELETE', key, item.id, item, null));
     
-    const modified = data.filter(n => {
+    const modified = preparedData.filter(n => {
       const o = oldValue.find(old => old && old.id === n.id);
       return o && JSON.stringify(o) !== JSON.stringify(n);
     });
@@ -158,8 +265,8 @@ export const saveJson = async (key, data) => {
     });
   }
 
-  localStorage.setItem(key, JSON.stringify(data));
-  await syncToCloud(key, data);
+  localStorage.setItem(key, JSON.stringify(preparedData));
+  await syncToCloud(key, preparedData);
   return true;
 };
 
@@ -174,10 +281,10 @@ export const hashPassword = async (password) => {
 
 // Helper: Calculate phone costs, profits and aging
 export const calculatePhoneCosts = (phone) => {
-  const purchasePrice = safeNumber(phone.purchasePrice);
-  const totalExpenses = (phone.expenses || []).reduce((sum, exp) => sum + safeNumber(exp.amount), 0);
+  const purchasePrice = parseNumber(phone.purchasePrice);
+  const totalExpenses = (phone.expenses || []).reduce((sum, exp) => sum + parseNumber(exp.amount), 0);
   const totalCost = round2(purchasePrice + totalExpenses);
-  const salesPrice = safeNumber(phone.salesPrice);
+  const salesPrice = parseNumber(phone.salesPrice);
   const profit = phone.status === 'Satıldı' ? round2(salesPrice - totalCost) : 0;
   
   const purchaseDate = new Date(phone.purchaseDate || Date.now());
@@ -204,7 +311,9 @@ export const ensureStorageKeys = () => {
     { key: STORAGE_KEYS.PARTS, defaultVal: [] },
     { key: STORAGE_KEYS.STOCK_MOVEMENTS, defaultVal: [] },
     { key: STORAGE_KEYS.INSTALLMENTS, defaultVal: [] },
-    { key: STORAGE_KEYS.TRADE_INS, defaultVal: [] }
+    { key: STORAGE_KEYS.TRADE_INS, defaultVal: [] },
+    { key: STORAGE_KEYS.CASH_MOVEMENTS, defaultVal: [] },
+    { key: STORAGE_KEYS.PENDING_SYNC, defaultVal: [] }
   ];
 
   keysToEnsure.forEach(({ key, defaultVal }) => {
@@ -218,15 +327,15 @@ export const ensureStorageKeys = () => {
 export const initDb = async (force = false) => {
   const existingUserStr = localStorage.getItem('tys_admin_user');
   if (existingUserStr && import.meta.env.DEV) {
-    // Only in DEV environment we keep existing local user.
-  } else {
-    localStorage.removeItem('tys_admin_user');
+    // Keep existing user in dev
+  } else if (!existingUserStr) {
+    // Local user setup initialized on demand
   }
 
   ensureStorageKeys();
 
   if (!force && localStorage.getItem(STORAGE_KEYS.PHONES) && localStorage.getItem(STORAGE_KEYS.SETTINGS)) {
-    return; // Already initialized
+    return;
   }
 
   const defaultSettings = {
@@ -247,6 +356,7 @@ export const initDb = async (force = false) => {
     saveJson(STORAGE_KEYS.PARTS, getJson(STORAGE_KEYS.PARTS, [])),
     saveJson(STORAGE_KEYS.STOCK_MOVEMENTS, getJson(STORAGE_KEYS.STOCK_MOVEMENTS, [])),
     saveJson(STORAGE_KEYS.INSTALLMENTS, getJson(STORAGE_KEYS.INSTALLMENTS, [])),
-    saveJson(STORAGE_KEYS.TRADE_INS, getJson(STORAGE_KEYS.TRADE_INS, []))
+    saveJson(STORAGE_KEYS.TRADE_INS, getJson(STORAGE_KEYS.TRADE_INS, [])),
+    saveJson(STORAGE_KEYS.CASH_MOVEMENTS, getJson(STORAGE_KEYS.CASH_MOVEMENTS, []))
   ]);
 };

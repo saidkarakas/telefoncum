@@ -1,8 +1,8 @@
-import { STORAGE_KEYS, getJson, saveJson, generateUUID, safeNumber, round2 } from './shared';
+import { STORAGE_KEYS, getJson, saveJson, generateUUID, parseNumber, validateNonNegative, round2 } from './shared';
 import { customerService } from './customerService';
-import { phoneService } from './phoneService';
 import { transactionService } from './transactionService';
-import { installmentService } from './installmentService';
+import { installmentService, mapPaymentMethod } from './installmentService';
+import { cashMovementService } from './cashMovementService';
 import { runTransaction } from './transactionRunner';
 
 export const tradeInService = {
@@ -25,7 +25,8 @@ export const tradeInService = {
         STORAGE_KEYS.PHONES,
         STORAGE_KEYS.CUSTOMERS,
         STORAGE_KEYS.TRANSACTIONS,
-        STORAGE_KEYS.INSTALLMENTS
+        STORAGE_KEYS.INSTALLMENTS,
+        STORAGE_KEYS.CASH_MOVEMENTS
       ],
       action: async () => {
         // 1. Verify sold phone
@@ -50,7 +51,7 @@ export const tradeInService = {
           }
         }
 
-        // 3. Resolve Customer
+        // 3. Resolve Customer (Requirement 3: dual name support)
         let customer = null;
         if (tradeData.customerId) {
           customer = customerService.getById(tradeData.customerId);
@@ -62,8 +63,8 @@ export const tradeInService = {
           throw new Error("Takas işlemi için müşteri bilgisi zorunludur.");
         }
 
-        const soldPhonePrice = safeNumber(tradeData.soldPhonePrice);
-        const receivedPhoneValue = safeNumber(tradeData.receivedPhoneValue);
+        const soldPhonePrice = validateNonNegative(tradeData.soldPhonePrice, 'Satılan Telefon Fiyatı');
+        const receivedPhoneValue = validateNonNegative(tradeData.receivedPhoneValue, 'Alınan Telefon Değeri');
         const diff = round2(soldPhonePrice - receivedPhoneValue);
 
         let diffDirection = 'closed';
@@ -77,13 +78,18 @@ export const tradeInService = {
           diffAmount = Math.abs(diff);
         }
 
-        const paidAmount = safeNumber(tradeData.paidAmount);
+        const paidAmount = validateNonNegative(tradeData.paidAmount || 0, 'Ödenen/Alınan Fark Tutarı');
+        if (paidAmount > diffAmount) {
+          throw new Error(`Ödenen fark tutarı (${paidAmount} TL), hesaplanan takas farkından (${diffAmount} TL) fazla olamaz.`);
+        }
+
         const remainingAmount = round2(diffAmount - paidAmount);
         const tradeDate = tradeData.tradeDate || new Date().toISOString().split('T')[0];
         const tradeInId = generateUUID();
         const receivedPhoneId = generateUUID();
+        const customerDisplayName = customer.fullName || customer.name;
 
-        // 4. Create Received Phone (Stock entry)
+        // 4. Create Received Phone (Stock entry with stockSource: 'trade_in')
         const newStockPhone = {
           id: receivedPhoneId,
           brand: (receivedData.brand || 'Bilinmiyor').trim(),
@@ -106,13 +112,14 @@ export const tradeInService = {
           status: 'Stokta',
           stockSource: 'trade_in',
           boughtFromId: customer.id,
-          boughtFromName: customer.name,
+          boughtFromName: customerDisplayName,
           boughtFromType: 'customer',
           tradeInId: tradeInId,
           purchaseDate: tradeDate,
           photos: receivedData.photos || [],
           expenses: [],
-          createdAt: new Date().toISOString()
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
         };
 
         // 5. Update Sold Phone Status
@@ -122,11 +129,12 @@ export const tradeInService = {
               ...p,
               status: 'Satıldı',
               soldToId: customer.id,
-              soldToName: customer.name,
+              soldToName: customerDisplayName,
               salesDate: tradeDate,
               salesPrice: soldPhonePrice,
               salesPaymentType: 'Takas',
-              tradeInId: tradeInId
+              tradeInId: tradeInId,
+              updatedAt: new Date().toISOString()
             };
           }
           return p;
@@ -134,12 +142,12 @@ export const tradeInService = {
 
         updatedPhones.push(newStockPhone);
 
-        // 6. Manage Accounting Transactions
+        // 6. Manage Accounting Transactions & Cash Movements
         const transactions = getJson(STORAGE_KEYS.TRANSACTIONS, []);
         const newTxList = [...transactions];
 
         // Primary Sale Debt
-        const saleDebtTx = {
+        newTxList.unshift({
           id: generateUUID(),
           contactId: customer.id,
           contactType: 'customer',
@@ -150,11 +158,10 @@ export const tradeInService = {
           sourceId: soldPhone.id,
           operationId: `${operationId}-debt`,
           description: `Takaslı Satış - ${soldPhone.brand} ${soldPhone.model}`
-        };
-        newTxList.unshift(saleDebtTx);
+        });
 
         // Trade-in Credit offset for received phone value
-        const tradeCreditTx = {
+        newTxList.unshift({
           id: generateUUID(),
           contactId: customer.id,
           contactType: 'customer',
@@ -165,43 +172,60 @@ export const tradeInService = {
           sourceId: receivedPhoneId,
           operationId: `${operationId}-credit`,
           description: `Takasa Alınan Cihaz Bedeli - ${newStockPhone.brand} ${newStockPhone.model}`
-        };
-        newTxList.unshift(tradeCreditTx);
+        });
 
         // Cash collection / payment for difference
-        if (diffDirection === 'customer_owes') {
-          if (paidAmount > 0) {
-            newTxList.unshift({
-              id: generateUUID(),
-              contactId: customer.id,
-              contactType: 'customer',
-              type: 'collection',
-              amount: paidAmount,
-              date: tradeDate,
-              sourceType: 'trade_in_diff_payment',
-              sourceId: tradeInId,
-              operationId: `${operationId}-diff-pay`,
-              description: `Takas Farkı Tahsilatı (${tradeData.paymentType || 'Nakit'})`
-            });
-          }
-        } else if (diffDirection === 'business_owes') {
-          if (paidAmount > 0) {
-            newTxList.unshift({
-              id: generateUUID(),
-              contactId: customer.id,
-              contactType: 'customer',
-              type: 'payment',
-              amount: paidAmount,
-              date: tradeDate,
-              sourceType: 'trade_in_diff_outflow',
-              sourceId: tradeInId,
-              operationId: `${operationId}-diff-out`,
-              description: `Müşteriye Ödenen Takas Farkı (${tradeData.paymentType || 'Nakit'})`
-            });
-          }
+        if (diffDirection === 'customer_owes' && paidAmount > 0) {
+          newTxList.unshift({
+            id: generateUUID(),
+            contactId: customer.id,
+            contactType: 'customer',
+            type: 'collection',
+            amount: paidAmount,
+            date: tradeDate,
+            sourceType: 'trade_in_diff_payment',
+            sourceId: tradeInId,
+            operationId: `${operationId}-diff-pay`,
+            description: `Takas Farkı Tahsilatı (${tradeData.paymentType || 'Nakit'})`
+          });
+
+          await cashMovementService.save({
+            operationId: `${operationId}-diff-cash`,
+            direction: 'in',
+            paymentMethod: mapPaymentMethod(tradeData.paymentType || 'Nakit'),
+            amount: paidAmount,
+            sourceType: 'trade_in',
+            sourceId: tradeInId,
+            description: `Takas Farkı Tahsilatı - ${customerDisplayName}`,
+            date: tradeDate
+          });
+        } else if (diffDirection === 'business_owes' && paidAmount > 0) {
+          newTxList.unshift({
+            id: generateUUID(),
+            contactId: customer.id,
+            contactType: 'customer',
+            type: 'payment',
+            amount: paidAmount,
+            date: tradeDate,
+            sourceType: 'trade_in_diff_outflow',
+            sourceId: tradeInId,
+            operationId: `${operationId}-diff-out`,
+            description: `Müşteriye Ödenen Takas Farkı (${tradeData.paymentType || 'Nakit'})`
+          });
+
+          await cashMovementService.save({
+            operationId: `${operationId}-diff-cash`,
+            direction: 'out',
+            paymentMethod: mapPaymentMethod(tradeData.paymentType || 'Nakit'),
+            amount: paidAmount,
+            sourceType: 'trade_in',
+            sourceId: tradeInId,
+            description: `Müşteriye Ödenen Takas Farkı - ${customerDisplayName}`,
+            date: tradeDate
+          });
         }
 
-        // Installment plan if chosen
+        // Installment plan if chosen for remaining customer debt
         let installmentPlanId = null;
         if (diffDirection === 'customer_owes' && remainingAmount > 0 && tradeData.paymentType === 'Taksit') {
           const instPlan = await installmentService.createPlan({
@@ -214,7 +238,8 @@ export const tradeInService = {
             downPayment: 0,
             installmentCount: tradeData.installmentCount || 2,
             startDate: tradeData.installmentStartDate || tradeDate,
-            note: `Takas Farkı Taksit Planı - ${soldPhone.brand} ${soldPhone.model}`
+            note: `Takas Farkı Taksit Planı - ${soldPhone.brand} ${soldPhone.model}`,
+            recordDownPaymentTransaction: false
           });
           installmentPlanId = instPlan.id;
         }
@@ -223,7 +248,7 @@ export const tradeInService = {
         const tradeInRecord = {
           id: tradeInId,
           customerId: customer.id,
-          customerName: customer.name,
+          customerName: customerDisplayName,
           soldPhoneId: soldPhone.id,
           soldPhoneName: `${soldPhone.brand} ${soldPhone.model}`,
           receivedPhoneId: receivedPhoneId,
@@ -255,6 +280,15 @@ export const tradeInService = {
           }
         };
       }
+    });
+  },
+
+  deleteTradeIn: async (id) => {
+    return await runTransaction(async () => {
+      const tradeIns = tradeInService.getAll();
+      const updated = tradeIns.filter(t => t.id !== id);
+      await saveJson(STORAGE_KEYS.TRADE_INS, updated);
+      return true;
     });
   }
 };

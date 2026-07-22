@@ -1,4 +1,4 @@
-import { STORAGE_KEYS, getJson, saveJson, SECURITY_LIMITS } from './shared';
+import { STORAGE_KEYS, getJson, saveJson, SECURITY_LIMITS, ensureStorageKeys } from './shared';
 
 export const settingsService = {
   get: () => {
@@ -10,14 +10,14 @@ export const settingsService = {
     });
   },
 
-  save: (settingsData) => {
-    saveJson(STORAGE_KEYS.SETTINGS, settingsData);
+  save: async (settingsData) => {
+    await saveJson(STORAGE_KEYS.SETTINGS, settingsData);
     return true;
   },
 
   exportDatabase: () => {
-    const db = { _version: '2.0' };
-    const EXCLUDED_KEYS = [STORAGE_KEYS.AUTH, STORAGE_KEYS.AUDIT_LOG, 'tys_admin_user'];
+    const db = { _version: '3.0' };
+    const EXCLUDED_KEYS = [STORAGE_KEYS.AUTH, STORAGE_KEYS.AUDIT_LOG, 'tys_admin_user', STORAGE_KEYS.PENDING_SYNC];
     
     Object.keys(STORAGE_KEYS).forEach(k => {
       const key = STORAGE_KEYS[k];
@@ -42,7 +42,7 @@ export const settingsService = {
     return JSON.stringify(db);
   },
 
-  importDatabase: (jsonString) => {
+  importDatabase: async (jsonString) => {
     const sanitizeObj = (obj, depth = 0) => {
       if (depth > SECURITY_LIMITS.MAX_OBJECT_DEPTH) throw new Error("Obje derinliği çok yüksek.");
       if (obj === null || typeof obj !== 'object') {
@@ -69,46 +69,69 @@ export const settingsService = {
     };
 
     try {
+      if (typeof jsonString === 'string' && (jsonString.includes('__proto__') || jsonString.includes('constructor') || jsonString.includes('prototype'))) {
+        throw new Error("Güvenlik İhlali: Prototype Pollution denemesi engellendi.");
+      }
+
       const db = JSON.parse(jsonString);
       if (!db || typeof db !== 'object' || Array.isArray(db)) {
         throw new Error("Geçersiz yedek formatı.");
       }
 
-      // Validasyon aşaması: Sadece geçerli anahtarları ve bozuk olmayan JSON verilerini kabul et
-      const validKeys = Object.values(STORAGE_KEYS).filter(k => k !== STORAGE_KEYS.AUTH && k !== STORAGE_KEYS.AUDIT_LOG);
-      const dataToSave = {};
+      const validKeys = Object.values(STORAGE_KEYS).filter(k => k !== STORAGE_KEYS.AUTH && k !== STORAGE_KEYS.AUDIT_LOG && k !== STORAGE_KEYS.PENDING_SYNC);
+      const collectionsToRestore = {};
 
-      for (const key of Object.keys(db)) {
-        if (key === '__proto__' || key === 'constructor' || key === 'prototype') {
-          throw new Error("Güvenlik İhlali: Prototype Pollution denemesi engellendi.");
-        }
-        if (key === '_version') continue;
-        
-        if (validKeys.includes(key) && db[key]) {
-           try {
-             const parsed = JSON.parse(db[key]);
-             if (Array.isArray(parsed) && parsed.length > SECURITY_LIMITS.MAX_ARRAY_LENGTH) {
-                 throw new Error(`Kayıt sayısı çok yüksek: ${key}`);
-             }
-             const sanitized = sanitizeObj(parsed);
-             dataToSave[key] = JSON.stringify(sanitized);
-           } catch (err) {
-             throw new Error(`'${key}' verisi bozuk veya geçersiz formatta: ` + err.message);
-           }
+      // Parse and sanitize collections in backup file
+      for (const key of validKeys) {
+        if (db[key]) {
+          try {
+            const parsed = typeof db[key] === 'string' ? JSON.parse(db[key]) : db[key];
+            const sanitized = sanitizeObj(parsed);
+            collectionsToRestore[key] = sanitized;
+          } catch (err) {
+            throw new Error(`'${key}' verisi bozuk: ` + err.message);
+          }
+        } else {
+          // Requirement 11: Missing new collections initialized as empty array [] or default settings
+          if (key === STORAGE_KEYS.SETTINGS) {
+            collectionsToRestore[key] = settingsService.get();
+          } else {
+            collectionsToRestore[key] = [];
+          }
         }
       }
 
-      if (Object.keys(dataToSave).length === 0) {
-        throw new Error("Yedek dosyasında aktarılacak geçerli veri bulunamadı.");
+      // Save and sync each collection to LocalStorage AND Supabase
+      for (const [key, data] of Object.entries(collectionsToRestore)) {
+        await saveJson(key, data);
       }
 
-      // Hata fırlatılmadıysa güvenle kaydet
-      Object.keys(dataToSave).forEach(k => {
-        localStorage.setItem(k, dataToSave[k]);
-      });
+      ensureStorageKeys();
       return true;
     } catch (e) {
       throw new Error(e.message || "Yedek dosyası geçersiz veya bozuk.");
     }
+  },
+
+  resetDatabase: async () => {
+    const dataKeys = [
+      STORAGE_KEYS.PHONES,
+      STORAGE_KEYS.CUSTOMERS,
+      STORAGE_KEYS.SUPPLIERS,
+      STORAGE_KEYS.TRANSACTIONS,
+      STORAGE_KEYS.EXPENSES,
+      STORAGE_KEYS.REPAIRS,
+      STORAGE_KEYS.PARTS,
+      STORAGE_KEYS.STOCK_MOVEMENTS,
+      STORAGE_KEYS.INSTALLMENTS,
+      STORAGE_KEYS.TRADE_INS,
+      STORAGE_KEYS.CASH_MOVEMENTS
+    ];
+
+    // Reset data collections to [] while preserving auth session & settings
+    for (const key of dataKeys) {
+      await saveJson(key, []);
+    }
+    return true;
   }
 };

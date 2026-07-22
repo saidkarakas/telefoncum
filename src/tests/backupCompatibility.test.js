@@ -1,8 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { settingsService } from '../db/services/settingsService';
 import { customerService } from '../db/services/customerService';
-import { supplierService } from '../db/services/supplierService';
-import { STORAGE_KEYS, saveJson, getJson, initDb } from '../db/services/shared';
+import { STORAGE_KEYS, getJson, initDb } from '../db/services/shared';
 
 describe('Backup Compatibility & Legacy Financial Balance Fallback', () => {
   beforeEach(() => {
@@ -64,7 +63,7 @@ describe('Backup Compatibility & Legacy Financial Balance Fallback', () => {
 
     // Clear local storage and import back
     localStorage.clear();
-    const result = settingsService.importDatabase(exportedJson);
+    const result = await settingsService.importDatabase(exportedJson);
     expect(result).toBe(true);
 
     const parts = getJson(STORAGE_KEYS.PARTS);

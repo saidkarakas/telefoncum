@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import { X, AlertCircle } from 'lucide-react';
+import { X, AlertCircle, ScanLine } from 'lucide-react';
 import { usePhone, BRAND_MODELS } from '../context/PhoneContext';
+import { phoneService } from '../db/services/phoneService';
 import BarcodeScanner from './BarcodeScanner';
-import { ScanLine } from 'lucide-react';
 
 export default function PhoneForm() {
   const [scannerField, setScannerField] = useState(null);
@@ -13,6 +13,7 @@ export default function PhoneForm() {
     setShowSellModal,
     showDeleteConfirm,
     setShowDeleteConfirm,
+    isSaving,
     editingPhone,
     sellingPhone,
     formData,
@@ -514,7 +515,7 @@ export default function PhoneForm() {
                       <span>Alış Fiyatı *</span>
                       {(() => {
                         if (formData.brand && formData.model) {
-                          const phones = require('../db/services/phoneService').phoneService.getAll();
+                          const phones = phoneService.getAll();
                           const pastMatches = phones.filter(p => p.brand === formData.brand && p.model === formData.model && p.purchasePrice && p.id !== editingPhone?.id);
                           if (pastMatches.length > 0) {
                             const avgPrice = Math.round(pastMatches.reduce((acc, p) => acc + Number(p.purchasePrice), 0) / pastMatches.length);
@@ -543,18 +544,75 @@ export default function PhoneForm() {
 
                   {/* Payment Type */}
                   <div className="space-y-1">
-                    <label className="font-semibold text-slate-500 uppercase tracking-wide">Ödeme Türü</label>
+                    <label className="font-semibold text-slate-500 uppercase tracking-wide">Ödeme Türü *</label>
                     <select
                       value={formData.purchasePaymentType}
                       onChange={(e) => setFormData(prev => ({ ...prev, purchasePaymentType: e.target.value }))}
-                      className="w-full p-2.5 border border-slate-200 dark:border-slate-800 rounded-xl bg-transparent text-slate-800 dark:text-white focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500"
+                      className="w-full p-2.5 border border-slate-200 dark:border-slate-800 rounded-xl bg-transparent text-slate-800 dark:text-white focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 font-bold"
                     >
                       <option value="Nakit">Nakit</option>
-                      <option value="Havale">Havale</option>
+                      <option value="Havale/EFT">Havale / EFT</option>
                       <option value="Kart">Kredi Kartı</option>
+                      <option value="Veresiye">Veresiye (Vadeli)</option>
+                      <option value="Karma Ödeme">Karma Ödeme</option>
                     </select>
                   </div>
                 </div>
+
+                {formData.purchasePaymentType === 'Karma Ödeme' && (
+                  <div className="p-3 bg-indigo-500/10 border border-indigo-500/30 rounded-xl space-y-3">
+                    <div className="font-bold text-indigo-600 dark:text-indigo-400 flex justify-between items-center text-xs">
+                      <span>Alış Karma Ödeme Dağılımı</span>
+                      <span className="text-[10px] text-slate-400">Toplam Alış: {formData.purchasePrice || 0} TL</span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 text-[11px]">
+                      <div>
+                        <label className="block text-slate-500 mb-1">Nakit (TL)</label>
+                        <input
+                          type="number"
+                          min="0"
+                          placeholder="0"
+                          value={formData.cashAmount || ''}
+                          onChange={(e) => setFormData(prev => ({ ...prev, cashAmount: e.target.value }))}
+                          className="w-full p-2 border border-slate-200 dark:border-slate-800 rounded-lg bg-white dark:bg-slate-900 font-bold"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-slate-500 mb-1">Havale / EFT (TL)</label>
+                        <input
+                          type="number"
+                          min="0"
+                          placeholder="0"
+                          value={formData.bankTransferAmount || ''}
+                          onChange={(e) => setFormData(prev => ({ ...prev, bankTransferAmount: e.target.value }))}
+                          className="w-full p-2 border border-slate-200 dark:border-slate-800 rounded-lg bg-white dark:bg-slate-900 font-bold"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-slate-500 mb-1">Kredi Kartı (TL)</label>
+                        <input
+                          type="number"
+                          min="0"
+                          placeholder="0"
+                          value={formData.cardAmount || ''}
+                          onChange={(e) => setFormData(prev => ({ ...prev, cardAmount: e.target.value }))}
+                          className="w-full p-2 border border-slate-200 dark:border-slate-800 rounded-lg bg-white dark:bg-slate-900 font-bold"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-slate-500 mb-1">Açık Veresiye Borç (TL)</label>
+                        <input
+                          type="number"
+                          min="0"
+                          placeholder="0"
+                          value={formData.veresiyeAmount || ''}
+                          onChange={(e) => setFormData(prev => ({ ...prev, veresiyeAmount: e.target.value }))}
+                          className="w-full p-2 border border-slate-200 dark:border-slate-800 rounded-lg bg-white dark:bg-slate-900 font-bold"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {/* Purchase Note */}
                 <div className="space-y-1">
@@ -669,7 +727,7 @@ export default function PhoneForm() {
                     <span>Satış Fiyatı *</span>
                     {(() => {
                       if (sellingPhone?.brand && sellingPhone?.model) {
-                        const phones = require('../db/services/phoneService').phoneService.getAll();
+                        const phones = phoneService.getAll();
                         const pastMatches = phones.filter(p => p.brand === sellingPhone.brand && p.model === sellingPhone.model && p.salesPrice && p.id !== sellingPhone.id);
                         if (pastMatches.length > 0) {
                           const avgPrice = Math.round(pastMatches.reduce((acc, p) => acc + Number(p.salesPrice), 0) / pastMatches.length);
@@ -714,7 +772,73 @@ export default function PhoneForm() {
                 </div>
               </div>
 
-              {/* Termed / Installment Sale Fields */}
+              {/* Termed / Installment Sale / Mixed Payment Fields */}
+              {sellData.salesPaymentType === 'Karma Ödeme' && (
+                <div className="p-3 bg-indigo-500/10 border border-indigo-500/30 rounded-xl space-y-3">
+                  <div className="font-bold text-indigo-600 dark:text-indigo-400 flex justify-between items-center">
+                    <span>Karma Ödeme Dağılımı</span>
+                    <span className="text-[10px] text-slate-400">Toplam: {sellData.salesPrice || 0} TL</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-[11px]">
+                    <div>
+                      <label className="block text-slate-500 mb-1">Nakit (TL)</label>
+                      <input
+                        type="number"
+                        min="0"
+                        placeholder="0"
+                        value={sellData.cashAmount || ''}
+                        onChange={(e) => setSellData(prev => ({ ...prev, cashAmount: e.target.value }))}
+                        className="w-full p-2 border border-slate-200 dark:border-slate-800 rounded-lg bg-white dark:bg-slate-900 font-bold"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-slate-500 mb-1">Havale / EFT (TL)</label>
+                      <input
+                        type="number"
+                        min="0"
+                        placeholder="0"
+                        value={sellData.bankTransferAmount || ''}
+                        onChange={(e) => setSellData(prev => ({ ...prev, bankTransferAmount: e.target.value }))}
+                        className="w-full p-2 border border-slate-200 dark:border-slate-800 rounded-lg bg-white dark:bg-slate-900 font-bold"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-slate-500 mb-1">Kredi Kartı (TL)</label>
+                      <input
+                        type="number"
+                        min="0"
+                        placeholder="0"
+                        value={sellData.cardAmount || ''}
+                        onChange={(e) => setSellData(prev => ({ ...prev, cardAmount: e.target.value }))}
+                        className="w-full p-2 border border-slate-200 dark:border-slate-800 rounded-lg bg-white dark:bg-slate-900 font-bold"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-slate-500 mb-1">Veresiye Borç (TL)</label>
+                      <input
+                        type="number"
+                        min="0"
+                        placeholder="0"
+                        value={sellData.veresiyeAmount || ''}
+                        onChange={(e) => setSellData(prev => ({ ...prev, veresiyeAmount: e.target.value }))}
+                        className="w-full p-2 border border-slate-200 dark:border-slate-800 rounded-lg bg-white dark:bg-slate-900 font-bold"
+                      />
+                    </div>
+                    <div className="col-span-2">
+                      <label className="block text-slate-500 mb-1">Taksitlendirilecek Borç (TL)</label>
+                      <input
+                        type="number"
+                        min="0"
+                        placeholder="0"
+                        value={sellData.installmentAmount || ''}
+                        onChange={(e) => setSellData(prev => ({ ...prev, installmentAmount: e.target.value }))}
+                        className="w-full p-2 border border-slate-200 dark:border-slate-800 rounded-lg bg-white dark:bg-slate-900 font-bold text-teal-600"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {(sellData.salesPaymentType === 'Veresiye' || sellData.salesPaymentType === 'Taksit') && (
                 <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl space-y-3">
                   <div className="font-bold text-amber-600 dark:text-amber-400 flex items-center justify-between">
@@ -735,21 +859,32 @@ export default function PhoneForm() {
                     </div>
 
                     {sellData.salesPaymentType === 'Taksit' && (
-                      <div>
-                        <label className="block text-slate-500 mb-1 font-semibold">Taksit Sayısı (Ay)</label>
-                        <select
-                          value={sellData.installmentCount || 3}
-                          onChange={(e) => setSellData(prev => ({ ...prev, installmentCount: e.target.value }))}
-                          className="w-full p-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 font-bold"
-                        >
-                          <option value="2">2 Taksit</option>
-                          <option value="3">3 Taksit</option>
-                          <option value="4">4 Taksit</option>
-                          <option value="6">6 Taksit</option>
-                          <option value="9">9 Taksit</option>
-                          <option value="12">12 Taksit</option>
-                        </select>
-                      </div>
+                      <>
+                        <div>
+                          <label className="block text-slate-500 mb-1 font-semibold">Taksit Sayısı (Ay)</label>
+                          <select
+                            value={sellData.installmentCount || 3}
+                            onChange={(e) => setSellData(prev => ({ ...prev, installmentCount: e.target.value }))}
+                            className="w-full p-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 font-bold"
+                          >
+                            <option value="2">2 Taksit</option>
+                            <option value="3">3 Taksit</option>
+                            <option value="4">4 Taksit</option>
+                            <option value="6">6 Taksit</option>
+                            <option value="9">9 Taksit</option>
+                            <option value="12">12 Taksit</option>
+                          </select>
+                        </div>
+                        <div className="col-span-2">
+                          <label className="block text-slate-500 mb-1 font-semibold">İlk Taksit Tarihi *</label>
+                          <input
+                            type="date"
+                            value={sellData.firstInstallmentDate || ''}
+                            onChange={(e) => setSellData(prev => ({ ...prev, firstInstallmentDate: e.target.value }))}
+                            className="w-full p-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 font-bold"
+                          />
+                        </div>
+                      </>
                     )}
                   </div>
                 </div>

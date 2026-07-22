@@ -61,6 +61,7 @@ export const PhoneProvider = ({ children, globalSearchQuery, activePage }) => {
   const [showAddEditModal, setShowAddEditModal] = useState(false);
   const [showSellModal, setShowSellModal] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   
   // Active items
   const [editingPhone, setEditingPhone] = useState(null);
@@ -77,14 +78,17 @@ export const PhoneProvider = ({ children, globalSearchQuery, activePage }) => {
     changedParts: [],
     boughtFromId: '', boughtFromName: '', purchaseContactPhone: '',
     purchaseDate: new Date().toISOString().split('T')[0],
-    purchasePrice: '', purchasePaymentType: 'Nakit', purchaseNote: ''
+    purchasePrice: '', purchasePaymentType: 'Nakit', purchaseNote: '',
+    cashAmount: '', bankTransferAmount: '', cardAmount: '', veresiyeAmount: '', installmentAmount: ''
   });
 
   // Form States (Sell)
   const [sellData, setSellData] = useState({
     soldToId: '', soldToName: '', salesContactPhone: '',
     salesDate: new Date().toISOString().split('T')[0],
-    salesPrice: '', salesPaymentType: 'Nakit', salesNote: ''
+    salesPrice: '', salesPaymentType: 'Nakit', salesNote: '',
+    downPayment: '', installmentCount: 3, firstInstallmentDate: '',
+    cashAmount: '', bankTransferAmount: '', cardAmount: '', veresiyeAmount: '', installmentAmount: ''
   });
 
   // Filter States
@@ -205,7 +209,8 @@ export const PhoneProvider = ({ children, globalSearchQuery, activePage }) => {
       changedParts: [],
       boughtFromId: '', boughtFromName: '', purchaseContactPhone: '',
       purchaseDate: new Date().toISOString().split('T')[0],
-      purchasePrice: '', purchasePaymentType: 'Nakit', purchaseNote: ''
+      purchasePrice: '', purchasePaymentType: 'Nakit', purchaseNote: '',
+      cashAmount: '', bankTransferAmount: '', cardAmount: '', veresiyeAmount: '', installmentAmount: ''
     });
     setFormError('');
     setShowAddEditModal(true);
@@ -264,8 +269,9 @@ export const PhoneProvider = ({ children, globalSearchQuery, activePage }) => {
     });
   };
 
-  const handleSavePhone = (e) => {
-    e.preventDefault();
+  const handleSavePhone = async (e) => {
+    if (e) e.preventDefault();
+    if (isSaving) return;
     setFormError('');
 
     if (!formData.brand.trim() || !formData.model.trim()) {
@@ -282,7 +288,8 @@ export const PhoneProvider = ({ children, globalSearchQuery, activePage }) => {
     }
 
     try {
-      phoneService.save({
+      setIsSaving(true);
+      await phoneService.save({
         ...formData,
         purchasePrice: Number(formData.purchasePrice),
         batteryHealth: Number(formData.batteryHealth)
@@ -291,6 +298,8 @@ export const PhoneProvider = ({ children, globalSearchQuery, activePage }) => {
       loadData();
     } catch (err) {
       setFormError(err.message || 'Cihaz kaydedilirken bir hata oluştu.');
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -305,7 +314,7 @@ export const PhoneProvider = ({ children, globalSearchQuery, activePage }) => {
       setFormData(prev => ({
         ...prev,
         boughtFromId: supplier.id,
-        boughtFromName: supplier.fullName,
+        boughtFromName: supplier.fullName || supplier.name,
         purchaseContactPhone: supplier.phone
       }));
       return;
@@ -316,7 +325,7 @@ export const PhoneProvider = ({ children, globalSearchQuery, activePage }) => {
       setFormData(prev => ({
         ...prev,
         boughtFromId: customer.id,
-        boughtFromName: customer.fullName,
+        boughtFromName: customer.fullName || customer.name,
         purchaseContactPhone: customer.phone
       }));
     }
@@ -324,18 +333,24 @@ export const PhoneProvider = ({ children, globalSearchQuery, activePage }) => {
 
   const handleSellClick = (phone) => {
     setSellingPhone(phone);
+    const today = new Date().toISOString().split('T')[0];
+    const defaultNextMonth = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
     setSellData({
       soldToId: '', soldToName: '', salesContactPhone: '',
-      salesDate: new Date().toISOString().split('T')[0],
+      salesDate: today,
       salesPrice: phone.purchasePrice * 1.25,
-      salesPaymentType: 'Nakit', salesNote: ''
+      salesPaymentType: 'Nakit', salesNote: '',
+      downPayment: 0, installmentCount: 3,
+      firstInstallmentDate: defaultNextMonth,
+      cashAmount: '', bankTransferAmount: '', cardAmount: '', veresiyeAmount: '', installmentAmount: ''
     });
     setFormError('');
     setShowSellModal(true);
   };
 
-  const handleSaveSale = (e) => {
-    e.preventDefault();
+  const handleSaveSale = async (e) => {
+    if (e) e.preventDefault();
+    if (isSaving) return;
     setFormError('');
 
     if (!sellData.salesPrice || Number(sellData.salesPrice) <= 0) {
@@ -344,7 +359,8 @@ export const PhoneProvider = ({ children, globalSearchQuery, activePage }) => {
     }
 
     try {
-      phoneService.sell(sellingPhone.id, {
+      setIsSaving(true);
+      await phoneService.sell(sellingPhone.id, {
         ...sellData,
         phoneModel: `${sellingPhone.brand} ${sellingPhone.model}`
       });
@@ -352,6 +368,8 @@ export const PhoneProvider = ({ children, globalSearchQuery, activePage }) => {
       loadData();
     } catch (err) {
       setFormError(err.message || 'Satış işlemi tamamlanamadı.');
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -365,7 +383,7 @@ export const PhoneProvider = ({ children, globalSearchQuery, activePage }) => {
       setSellData(prev => ({
         ...prev,
         soldToId: customer.id,
-        soldToName: customer.fullName,
+        soldToName: customer.fullName || customer.name,
         salesContactPhone: customer.phone
       }));
     }
@@ -376,12 +394,19 @@ export const PhoneProvider = ({ children, globalSearchQuery, activePage }) => {
     setShowDeleteConfirm(true);
   };
 
-  const handleConfirmDelete = () => {
-    if (deletingPhoneId) {
-      phoneService.delete(deletingPhoneId);
-      setShowDeleteConfirm(false);
-      setDeletingPhoneId(null);
-      loadData();
+  const handleConfirmDelete = async () => {
+    if (deletingPhoneId && !isSaving) {
+      try {
+        setIsSaving(true);
+        await phoneService.delete(deletingPhoneId);
+        setShowDeleteConfirm(false);
+        setDeletingPhoneId(null);
+        loadData();
+      } catch (err) {
+        alert(err.message || "Telefon silinemedi.");
+      } finally {
+        setIsSaving(false);
+      }
     }
   };
 
@@ -407,6 +432,7 @@ export const PhoneProvider = ({ children, globalSearchQuery, activePage }) => {
       showAddEditModal, setShowAddEditModal,
       showSellModal, setShowSellModal,
       showDeleteConfirm, setShowDeleteConfirm,
+      isSaving,
       editingPhone, setEditingPhone,
       sellingPhone, setSellingPhone,
       deletingPhoneId, setDeletingPhoneId,
