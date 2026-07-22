@@ -698,18 +698,62 @@ export default function PhoneForm() {
 
                 {/* Payment Type */}
                 <div className="space-y-1">
-                  <label className="font-semibold text-slate-500 uppercase tracking-wide block">Ödeme Türü</label>
+                  <label className="font-semibold text-slate-500 uppercase tracking-wide block">Ödeme Türü *</label>
                   <select
                     value={sellData.salesPaymentType}
                     onChange={(e) => setSellData(prev => ({ ...prev, salesPaymentType: e.target.value }))}
-                    className="w-full p-2.5 border border-slate-200 dark:border-slate-800 rounded-xl bg-transparent text-slate-800 dark:text-white focus:outline-none"
+                    className="w-full p-2.5 border border-slate-200 dark:border-slate-800 rounded-xl bg-transparent text-slate-800 dark:text-white focus:outline-none font-bold"
                   >
                     <option value="Nakit">Nakit</option>
-                    <option value="Havale">Havale</option>
-                    <option value="Kart">Kredi Kartı</option>
+                    <option value="Havale/EFT">Havale / EFT</option>
+                    <option value="Kart">Kredi / Banka Kartı</option>
+                    <option value="Veresiye">Veresiye (Vadeli)</option>
+                    <option value="Taksit">Taksitli Satış</option>
+                    <option value="Karma Ödeme">Karma Ödeme</option>
                   </select>
                 </div>
               </div>
+
+              {/* Termed / Installment Sale Fields */}
+              {(sellData.salesPaymentType === 'Veresiye' || sellData.salesPaymentType === 'Taksit') && (
+                <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl space-y-3">
+                  <div className="font-bold text-amber-600 dark:text-amber-400 flex items-center justify-between">
+                    <span>{sellData.salesPaymentType === 'Taksit' ? 'Taksit Planı Bilgileri' : 'Veresiye Bilgileri'}</span>
+                    <span className="text-[10px] font-normal text-slate-500">* Müşteri kaydı zorunludur</span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-slate-500 mb-1 font-semibold">Alınan Peşinat (TL)</label>
+                      <input
+                        type="number"
+                        min="0"
+                        value={sellData.downPayment || 0}
+                        onChange={(e) => setSellData(prev => ({ ...prev, downPayment: e.target.value }))}
+                        className="w-full p-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 font-bold"
+                      />
+                    </div>
+
+                    {sellData.salesPaymentType === 'Taksit' && (
+                      <div>
+                        <label className="block text-slate-500 mb-1 font-semibold">Taksit Sayısı (Ay)</label>
+                        <select
+                          value={sellData.installmentCount || 3}
+                          onChange={(e) => setSellData(prev => ({ ...prev, installmentCount: e.target.value }))}
+                          className="w-full p-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 font-bold"
+                        >
+                          <option value="2">2 Taksit</option>
+                          <option value="3">3 Taksit</option>
+                          <option value="4">4 Taksit</option>
+                          <option value="6">6 Taksit</option>
+                          <option value="9">9 Taksit</option>
+                          <option value="12">12 Taksit</option>
+                        </select>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
 
               {/* Profit preview info box */}
               {sellData.salesPrice && sellingPhone && (

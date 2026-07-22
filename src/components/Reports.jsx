@@ -153,6 +153,88 @@ export default function Reports({ activePage }) {
 
       </div>
 
+      {/* NEW MODULE REPORTS: TAKAS, ALACAK & PARÇA STOK */}
+      {data.trade && data.receivables && data.parts && (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          {/* Takas Raporu */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm space-y-3">
+            <h4 className="font-bold uppercase tracking-wider text-xs text-teal-600 dark:text-teal-400 border-b border-slate-100 dark:border-slate-800 pb-2">
+              Takas Raporu
+            </h4>
+            <div className="space-y-2 text-xs">
+              <div className="flex justify-between">
+                <span className="text-slate-500">Toplam Takas Sayısı:</span>
+                <span className="font-bold text-slate-900 dark:text-white">{data.trade.tradeCount} İşlem</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Alınan Takas Cihaz Değeri:</span>
+                <span className="font-bold font-mono text-slate-900 dark:text-white">{data.trade.tradeReceivedValue.toLocaleString('tr-TR')} TL</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Tahsil Edilen Takas Farkı:</span>
+                <span className="font-bold font-mono text-emerald-500">{data.trade.tradeCollectedDiff.toLocaleString('tr-TR')} TL</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Müşteri Takas Borcu:</span>
+                <span className="font-bold font-mono text-amber-500">{data.trade.tradeCustomerReceivables.toLocaleString('tr-TR')} TL</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Taksit ve Veresiye Raporu */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm space-y-3">
+            <h4 className="font-bold uppercase tracking-wider text-xs text-indigo-600 dark:text-indigo-400 border-b border-slate-100 dark:border-slate-800 pb-2">
+              Taksit & Cari Raporu
+            </h4>
+            <div className="space-y-2 text-xs">
+              <div className="flex justify-between">
+                <span className="text-slate-500">Toplam Açık Müşteri Alacağı:</span>
+                <span className="font-bold font-mono text-teal-600 dark:text-teal-400">{data.receivables.totalCustomerReceivables.toLocaleString('tr-TR')} TL</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Gecikmiş Taksit Alacağı:</span>
+                <span className="font-bold font-mono text-rose-500">{data.receivables.totalOverdueReceivables.toLocaleString('tr-TR')} TL</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Bu Ay Alınan Tahsilatlar:</span>
+                <span className="font-bold font-mono text-emerald-500">{data.receivables.monthlyCollections.toLocaleString('tr-TR')} TL</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Vadesi Yaklaşan Taksitler:</span>
+                <span className="font-bold font-mono text-slate-900 dark:text-white">{data.receivables.upcomingInstallmentsTotal.toLocaleString('tr-TR')} TL</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Parça Stok & Tamir Raporu */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm space-y-3">
+            <h4 className="font-bold uppercase tracking-wider text-xs text-emerald-600 dark:text-emerald-400 border-b border-slate-100 dark:border-slate-800 pb-2">
+              Parça Stok & Tamir Kârı
+            </h4>
+            <div className="space-y-2 text-xs">
+              <div className="flex justify-between">
+                <span className="text-slate-500">Parça Stok Alış Değeri:</span>
+                <span className="font-bold font-mono text-slate-900 dark:text-white">{data.parts.partsTotalPurchaseCost.toLocaleString('tr-TR')} TL</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Tamir Parça Kârı:</span>
+                <span className="font-bold font-mono text-emerald-500">{data.parts.repairPartsProfit.toLocaleString('tr-TR')} TL</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Tamir İşçilik Geliri:</span>
+                <span className="font-bold font-mono text-indigo-500">{data.parts.repairLaborIncomeTotal.toLocaleString('tr-TR')} TL</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Kritik Stok Uyarısı:</span>
+                <span className={`font-bold ${data.parts.criticalPartsCount > 0 ? 'text-rose-500' : 'text-slate-500'}`}>
+                  {data.parts.criticalPartsCount} Çeşit Parça
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* POPULAR BRANDS AND SALES CHARTS SECTION */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         

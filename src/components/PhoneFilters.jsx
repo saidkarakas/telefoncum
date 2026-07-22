@@ -116,10 +116,12 @@ export default function PhoneFilters() {
             >
               <option value="">Tümü</option>
               <option value="Stokta">Stokta</option>
-              <option value="Satışta">Satışta</option>
-              <option value="Tamirde">Tamirde</option>
               <option value="Rezerve">Rezerve</option>
-              <option value="Satıldı">Satıldı (Arşiv)</option>
+              <option value="Satıldı">Satıldı</option>
+              <option value="Takasta Alındı">Takasta Alındı</option>
+              <option value="Serviste">Serviste / Tamirde</option>
+              <option value="İade">İade</option>
+              <option value="Hurda">Hurda / Parça</option>
             </select>
           </div>
 

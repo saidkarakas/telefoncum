@@ -167,7 +167,7 @@ export default function SettingsPage({ activePage }) {
               type="text"
               value={settings.businessName}
               onChange={(e) => setSettings(prev => ({ ...prev, businessName: e.target.value }))}
-              placeholder="GigaTeknoloji"
+              placeholder="Telefoncum"
               className="w-full p-2.5 border border-slate-200 dark:border-slate-800 rounded-xl bg-transparent focus:ring-1 focus:ring-indigo-500 text-xs"
               required
             />

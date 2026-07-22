@@ -666,9 +666,25 @@ export default function CustomerSupplierManager({ activePage, globalSearchQuery 
                             </td>
                             <td className="p-3 font-semibold text-slate-800 dark:text-slate-200">{t.description}</td>
                             <td className="p-3">
-                              {t.type === 'tahsilat' ? (
+                              {t.type === 'tahsilat' || t.type === 'collection' ? (
                                 <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 dark:bg-emerald-950/20 dark:text-emerald-400 font-bold border border-emerald-100 dark:border-emerald-900/30">
                                   <ArrowDownLeft size={12} /> Tahsilat (Giriş)
+                                </span>
+                              ) : t.type === 'sale_debt' ? (
+                                <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded bg-amber-50 text-amber-700 dark:bg-amber-950/20 dark:text-amber-400 font-bold border border-amber-100 dark:border-amber-900/30">
+                                  Cihaz Satış Borcu
+                                </span>
+                              ) : t.type === 'purchase_debt' ? (
+                                <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded bg-blue-50 text-blue-700 dark:bg-blue-950/20 dark:text-blue-400 font-bold border border-blue-100 dark:border-blue-900/30">
+                                  Cihaz Alış Borcu
+                                </span>
+                              ) : t.type === 'trade_difference_receivable' ? (
+                                <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded bg-purple-50 text-purple-700 dark:bg-purple-950/20 dark:text-purple-400 font-bold border border-purple-100 dark:border-purple-900/30">
+                                  Takas Fark Alacağı
+                                </span>
+                              ) : t.type === 'trade_difference_payable' ? (
+                                <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded bg-pink-50 text-pink-700 dark:bg-pink-950/20 dark:text-pink-400 font-bold border border-pink-100 dark:border-pink-900/30">
+                                  Takas Fark Borcu
                                 </span>
                               ) : (
                                 <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded bg-red-50 text-red-700 dark:bg-red-950/20 dark:text-red-400 font-bold border border-red-100 dark:border-red-900/30">

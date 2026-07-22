@@ -101,8 +101,8 @@ export default function Dashboard({ setActivePage, setSelectedPhoneId, setOpenPh
     { label: 'Stokta', value: cards.stockCount, icon: Smartphone, page: 'phones' },
     { label: 'Bugün Alınan', value: cards.boughtToday, icon: ShoppingCart, page: 'phones' },
     { label: 'Bugün Satılan', value: cards.soldToday, icon: CheckCircle2, page: 'phones' },
-    { label: 'Tamirde', value: cards.inRepair, icon: Wrench, page: 'repairs' },
-    { label: 'Bekleyen', value: cards.pendingRepairs, icon: Clock, page: 'repairs' },
+    { label: 'Geciken Taksit', value: cards.overdueCount || 0, icon: Clock, page: 'installments' },
+    { label: 'Kritik Parça', value: cards.criticalPartsCount || 0, icon: Wrench, page: 'parts' },
   ];
 
   const handleViewDetail = (phoneId) => {

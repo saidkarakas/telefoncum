@@ -9,7 +9,11 @@ export const STORAGE_KEYS = {
   REPAIRS: 'tys_repairs',
   SETTINGS: 'tys_settings',
   AUTH: 'tys_auth_session',
-  AUDIT_LOG: 'tys_audit_log'
+  AUDIT_LOG: 'tys_audit_log',
+  PARTS: 'tys_parts',
+  STOCK_MOVEMENTS: 'tys_stock_movements',
+  INSTALLMENTS: 'tys_installments',
+  TRADE_INS: 'tys_trade_ins'
 };
 
 export const SECURITY_LIMITS = {
@@ -20,10 +24,38 @@ export const SECURITY_LIMITS = {
   MAX_OBJECT_KEYS: 200
 };
 
+// Helper: Safe UUID Generator
+export const generateUUID = () => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    try {
+      return crypto.randomUUID();
+    } catch (e) {
+      // Fallback
+    }
+  }
+  return 'id-' + Math.random().toString(36).substring(2, 11) + '-' + Date.now().toString(36);
+};
+
+// Helper: Safe Number Conversion with Non-Negative check and 2 Decimal Rounding
+export const safeNumber = (val, allowNegative = false) => {
+  if (val === null || val === undefined || val === '') return 0;
+  const num = Number(val);
+  if (isNaN(num)) return 0;
+  if (!allowNegative && num < 0) return 0;
+  return Math.round((num + Number.EPSILON) * 100) / 100;
+};
+
+export const round2 = (val) => safeNumber(val, true);
+
 // Helper: Get item from LocalStorage
 export const getJson = (key, defaultValue = []) => {
   const data = localStorage.getItem(key);
-  return data ? JSON.parse(data) : defaultValue;
+  if (!data) return defaultValue;
+  try {
+    return JSON.parse(data);
+  } catch (e) {
+    return defaultValue;
+  }
 };
 
 // Helper: Sync data to Supabase in the background
@@ -67,7 +99,7 @@ export const logAction = async (action, entityType, entityId, oldValue, newValue
   };
 
   const newLog = {
-    id: Math.random().toString(36).substring(2, 15),
+    id: generateUUID(),
     action,
     entity_type: entityType,
     entity_id: entityId,
@@ -80,16 +112,15 @@ export const logAction = async (action, entityType, entityId, oldValue, newValue
   localLogs.unshift(newLog);
   if (localLogs.length > 500) localLogs = localLogs.slice(0, 500);
   
-  // Custom manual save to avoid recursive syncToCloud loops if we hooked it there
   try {
     localStorage.setItem(STORAGE_KEYS.AUDIT_LOG, JSON.stringify(localLogs));
-    // Trigger local event
-    window.dispatchEvent(new Event('tys_audit_log_update'));
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('tys_audit_log_update'));
+    }
   } catch (e) {
     console.error("Audit log kaydetme hatası", e);
   }
 
-  // Sync to supabase if configured
   if (isSupabaseConfigured && owner_id) {
     try {
       await supabase.from('tys_audit_log').insert({
@@ -107,28 +138,29 @@ export const logAction = async (action, entityType, entityId, oldValue, newValue
 };
 
 // Helper: Save item to LocalStorage and trigger sync to cloud
-export const saveJson = (key, data) => {
+export const saveJson = async (key, data) => {
   const oldValue = getJson(key, null);
   
   if (key !== STORAGE_KEYS.AUDIT_LOG && key !== STORAGE_KEYS.AUTH && Array.isArray(data) && Array.isArray(oldValue)) {
-    const added = data.filter(n => !oldValue.find(o => o.id === n.id));
+    const added = data.filter(n => !oldValue.find(o => o && o.id === n.id));
     added.forEach(item => logAction('CREATE', key, item.id, null, item));
     
-    const deleted = oldValue.filter(o => !data.find(n => n.id === o.id));
+    const deleted = oldValue.filter(o => o && !data.find(n => n.id === o.id));
     deleted.forEach(item => logAction('DELETE', key, item.id, item, null));
     
     const modified = data.filter(n => {
-      const o = oldValue.find(old => old.id === n.id);
+      const o = oldValue.find(old => old && old.id === n.id);
       return o && JSON.stringify(o) !== JSON.stringify(n);
     });
     modified.forEach(item => {
-      const o = oldValue.find(old => old.id === item.id);
+      const o = oldValue.find(old => old && old.id === item.id);
       logAction('UPDATE', key, item.id, o, item);
     });
   }
 
   localStorage.setItem(key, JSON.stringify(data));
-  return syncToCloud(key, data);
+  await syncToCloud(key, data);
+  return true;
 };
 
 // Helper: Secure SHA-256 Password Hasher using native browser SubtleCrypto
@@ -142,15 +174,14 @@ export const hashPassword = async (password) => {
 
 // Helper: Calculate phone costs, profits and aging
 export const calculatePhoneCosts = (phone) => {
-  const purchasePrice = Number(phone.purchasePrice || 0);
-  const totalExpenses = (phone.expenses || []).reduce((sum, exp) => sum + Number(exp.amount || 0), 0);
-  const totalCost = purchasePrice + totalExpenses;
-  const salesPrice = Number(phone.salesPrice || 0);
-  const profit = phone.status === 'Satıldı' ? salesPrice - totalCost : 0;
+  const purchasePrice = safeNumber(phone.purchasePrice);
+  const totalExpenses = (phone.expenses || []).reduce((sum, exp) => sum + safeNumber(exp.amount), 0);
+  const totalCost = round2(purchasePrice + totalExpenses);
+  const salesPrice = safeNumber(phone.salesPrice);
+  const profit = phone.status === 'Satıldı' ? round2(salesPrice - totalCost) : 0;
   
-  // Calculate days in stock
-  const purchaseDate = new Date(phone.purchaseDate);
-  const endDate = phone.status === 'Satıldı' ? new Date(phone.salesDate) : new Date();
+  const purchaseDate = new Date(phone.purchaseDate || Date.now());
+  const endDate = phone.status === 'Satıldı' && phone.salesDate ? new Date(phone.salesDate) : new Date();
   const diffTime = Math.abs(endDate - purchaseDate);
   const daysInStock = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) || 0;
 
@@ -162,10 +193,29 @@ export const calculatePhoneCosts = (phone) => {
   };
 };
 
+export const ensureStorageKeys = () => {
+  const keysToEnsure = [
+    { key: STORAGE_KEYS.PHONES, defaultVal: [] },
+    { key: STORAGE_KEYS.CUSTOMERS, defaultVal: [] },
+    { key: STORAGE_KEYS.SUPPLIERS, defaultVal: [] },
+    { key: STORAGE_KEYS.TRANSACTIONS, defaultVal: [] },
+    { key: STORAGE_KEYS.EXPENSES, defaultVal: [] },
+    { key: STORAGE_KEYS.REPAIRS, defaultVal: [] },
+    { key: STORAGE_KEYS.PARTS, defaultVal: [] },
+    { key: STORAGE_KEYS.STOCK_MOVEMENTS, defaultVal: [] },
+    { key: STORAGE_KEYS.INSTALLMENTS, defaultVal: [] },
+    { key: STORAGE_KEYS.TRADE_INS, defaultVal: [] }
+  ];
+
+  keysToEnsure.forEach(({ key, defaultVal }) => {
+    if (localStorage.getItem(key) === null) {
+      localStorage.setItem(key, JSON.stringify(defaultVal));
+    }
+  });
+};
+
 // Initialize DB and seed demo data if empty
 export const initDb = async (force = false) => {
-  // 8. Auth session (Removed default admin for security)
-  // The system should rely on Supabase for auth.
   const existingUserStr = localStorage.getItem('tys_admin_user');
   if (existingUserStr && import.meta.env.DEV) {
     // Only in DEV environment we keep existing local user.
@@ -173,35 +223,30 @@ export const initDb = async (force = false) => {
     localStorage.removeItem('tys_admin_user');
   }
 
-  if (!force && localStorage.getItem(STORAGE_KEYS.PHONES)) {
+  ensureStorageKeys();
+
+  if (!force && localStorage.getItem(STORAGE_KEYS.PHONES) && localStorage.getItem(STORAGE_KEYS.SETTINGS)) {
     return; // Already initialized
   }
 
-  // 1. Settings
   const defaultSettings = {
-    businessName: 'GigaTeknoloji Telefon Alım Satım',
+    businessName: 'Telefoncum',
     logo: '',
     currency: 'TL',
     theme: 'dark'
   };
 
-  if (force) {
-    await Promise.all([
-      saveJson(STORAGE_KEYS.SETTINGS, defaultSettings),
-      saveJson(STORAGE_KEYS.CUSTOMERS, []),
-      saveJson(STORAGE_KEYS.SUPPLIERS, []),
-      saveJson(STORAGE_KEYS.PHONES, []),
-      saveJson(STORAGE_KEYS.EXPENSES, []),
-      saveJson(STORAGE_KEYS.TRANSACTIONS, []),
-      saveJson(STORAGE_KEYS.REPAIRS, [])
-    ]);
-  } else {
-    saveJson(STORAGE_KEYS.SETTINGS, defaultSettings);
-    saveJson(STORAGE_KEYS.CUSTOMERS, []);
-    saveJson(STORAGE_KEYS.SUPPLIERS, []);
-    saveJson(STORAGE_KEYS.PHONES, []);
-    saveJson(STORAGE_KEYS.EXPENSES, []);
-    saveJson(STORAGE_KEYS.TRANSACTIONS, []);
-    saveJson(STORAGE_KEYS.REPAIRS, []);
-  }
+  await saveJson(STORAGE_KEYS.SETTINGS, defaultSettings);
+  await Promise.all([
+    saveJson(STORAGE_KEYS.CUSTOMERS, getJson(STORAGE_KEYS.CUSTOMERS, [])),
+    saveJson(STORAGE_KEYS.SUPPLIERS, getJson(STORAGE_KEYS.SUPPLIERS, [])),
+    saveJson(STORAGE_KEYS.PHONES, getJson(STORAGE_KEYS.PHONES, [])),
+    saveJson(STORAGE_KEYS.EXPENSES, getJson(STORAGE_KEYS.EXPENSES, [])),
+    saveJson(STORAGE_KEYS.TRANSACTIONS, getJson(STORAGE_KEYS.TRANSACTIONS, [])),
+    saveJson(STORAGE_KEYS.REPAIRS, getJson(STORAGE_KEYS.REPAIRS, [])),
+    saveJson(STORAGE_KEYS.PARTS, getJson(STORAGE_KEYS.PARTS, [])),
+    saveJson(STORAGE_KEYS.STOCK_MOVEMENTS, getJson(STORAGE_KEYS.STOCK_MOVEMENTS, [])),
+    saveJson(STORAGE_KEYS.INSTALLMENTS, getJson(STORAGE_KEYS.INSTALLMENTS, [])),
+    saveJson(STORAGE_KEYS.TRADE_INS, getJson(STORAGE_KEYS.TRADE_INS, []))
+  ]);
 };

@@ -1,11 +1,19 @@
+import { STORAGE_KEYS, getJson, safeNumber, round2 } from './shared';
 import { phoneService } from './phoneService';
 import { repairService } from './repairService';
 import { expenseService } from './expenseService';
+import { installmentService } from './installmentService';
+import { tradeInService } from './tradeInService';
+import { partService } from './partService';
+import { customerService } from './customerService';
+import { supplierService } from './supplierService';
 
 export const reportService = {
   getDashboardData: () => {
     const phones = phoneService.getAll();
     const repairs = repairService.getAll();
+    const installments = installmentService.getAll();
+    const parts = partService.getAll();
     const todayStr = new Date().toISOString().split('T')[0];
 
     const stockCount = phones.filter(p => p.status !== 'Satıldı').length;
@@ -15,22 +23,36 @@ export const reportService = {
     
     const boughtToday = phones.filter(p => p.purchaseDate === todayStr).length;
     const soldToday = phones.filter(p => p.salesDate === todayStr).length;
-    const inRepair = repairs.filter(r => r.status === 'Tamirde').length;
+    const inRepair = repairs.filter(r => r.status === 'Serviste' || r.status === 'Tamirde').length;
     const pendingRepairs = repairs.filter(r => r.status === 'Bekliyor').length;
 
-    const sortedByDate = [...phones].sort((a, b) => new Date(b.purchaseDate) - new Date(a.purchaseDate));
+    // Overdue installments metrics
+    let overdueCount = 0;
+    let overdueTotalAmount = 0;
+    installments.forEach(plan => {
+      (plan.schedule || []).forEach(item => {
+        if (item.status === 'Gecikmiş' && item.remainingAmount > 0) {
+          overdueCount += 1;
+          overdueTotalAmount += item.remainingAmount;
+        }
+      });
+    });
+
+    // Critical stock parts
+    const criticalParts = parts.filter(p => p.quantity <= (p.minQuantity || 0));
+
+    const sortedByDate = [...phones].sort((a, b) => new Date(b.purchaseDate || Date.now()) - new Date(a.purchaseDate || Date.now()));
     const recentAdded = sortedByDate.slice(0, 5);
 
     const soldPhones = phones.filter(p => p.status === 'Satıldı');
-    const recentSold = [...soldPhones].sort((a, b) => new Date(b.salesDate) - new Date(a.salesDate)).slice(0, 5);
+    const recentSold = [...soldPhones].sort((a, b) => new Date(b.salesDate || Date.now()) - new Date(a.salesDate || Date.now())).slice(0, 5);
 
     const waitingInStock = phones.filter(p => p.status !== 'Satıldı');
     const longWaiting = [...waitingInStock]
       .sort((a, b) => b.daysInStock - a.daysInStock)
       .slice(0, 5);
 
-    // Upsell Renewal Bot (Madde 14)
-    // Find phones sold roughly 1 year ago (between 330 and 395 days ago)
+    // Upsell Renewal Bot
     const nowTs = new Date().getTime();
     const oneDay = 24 * 60 * 60 * 1000;
     const upsellCandidates = soldPhones.filter(p => {
@@ -49,13 +71,17 @@ export const reportService = {
         boughtToday,
         soldToday,
         inRepair,
-        pendingRepairs
+        pendingRepairs,
+        overdueCount,
+        overdueTotalAmount: round2(overdueTotalAmount),
+        criticalPartsCount: criticalParts.length
       },
       lists: {
         recentAdded,
         recentSold,
         longWaiting,
-        upsellCandidates
+        upsellCandidates,
+        criticalParts: criticalParts.slice(0, 5)
       }
     };
   },
@@ -63,7 +89,14 @@ export const reportService = {
   getReportSummary: () => {
     const phones = phoneService.getAll();
     const gExpenses = expenseService.getAll();
-    
+    const repairs = repairService.getAll();
+    const tradeIns = tradeInService.getAll();
+    const installments = installmentService.getAll();
+    const parts = partService.getAll();
+    const customers = customerService.getAll();
+    const suppliers = supplierService.getAll();
+    const transactions = getJson(STORAGE_KEYS.TRANSACTIONS, []);
+
     const totalPurchaseValue = phones.reduce((sum, p) => sum + p.purchasePrice, 0);
     const totalSalesValue = phones.filter(p => p.status === 'Satıldı').reduce((sum, p) => sum + p.salesPrice, 0);
     const totalProfit = phones.filter(p => p.status === 'Satıldı').reduce((sum, p) => sum + p.profit, 0);
@@ -75,7 +108,58 @@ export const reportService = {
     const totalStockCost = phones.filter(p => p.status !== 'Satıldı').reduce((sum, p) => sum + p.totalCost, 0);
 
     const soldPhones = phones.filter(p => p.status === 'Satıldı');
+
+    // 1. Trade-in Metrics
+    const tradeCount = tradeIns.length;
+    const tradeReceivedValue = tradeIns.reduce((sum, t) => sum + safeNumber(t.receivedPhoneValue), 0);
+    const tradeCollectedDiff = tradeIns.reduce((sum, t) => sum + safeNumber(t.paidAmount), 0);
+    const tradeCustomerReceivables = tradeIns
+      .filter(t => t.differenceDirection === 'customer_owes')
+      .reduce((sum, t) => sum + safeNumber(t.remainingAmount), 0);
+    const tradeBusinessPayables = tradeIns
+      .filter(t => t.differenceDirection === 'business_owes')
+      .reduce((sum, t) => sum + safeNumber(t.remainingAmount), 0);
+
+    // 2. Installment & Receivables Metrics
+    const totalCustomerReceivables = customers.reduce((sum, c) => sum + safeNumber(c.debt), 0);
+    const totalSupplierPayables = suppliers.reduce((sum, s) => sum + safeNumber(s.debt), 0);
     
+    let totalOverdueReceivables = 0;
+    let upcomingInstallmentsTotal = 0;
+    const currentMonthKey = new Date().toISOString().substring(0, 7);
+
+    const monthlyCollections = transactions
+      .filter(t => (t.type === 'collection' || t.type === 'tahsilat') && (t.date || '').startsWith(currentMonthKey))
+      .reduce((sum, t) => sum + safeNumber(t.amount), 0);
+
+    installments.forEach(plan => {
+      (plan.schedule || []).forEach(item => {
+        if (item.status === 'Gecikmiş') {
+          totalOverdueReceivables += item.remainingAmount;
+        } else if (item.status === 'Bekliyor') {
+          upcomingInstallmentsTotal += item.remainingAmount;
+        }
+      });
+    });
+
+    // 3. Parts Stock Metrics
+    const partsTotalPurchaseCost = parts.reduce((sum, p) => sum + (safeNumber(p.quantity) * safeNumber(p.purchasePrice)), 0);
+    const partsTotalPotentialSale = parts.reduce((sum, p) => sum + (safeNumber(p.quantity) * safeNumber(p.salePrice)), 0);
+    const criticalPartsList = parts.filter(p => p.quantity <= (p.minQuantity || 0));
+
+    let repairPartsCostTotal = 0;
+    let repairPartsSaleTotal = 0;
+    let repairLaborIncomeTotal = 0;
+
+    repairs.forEach(r => {
+      repairPartsCostTotal += safeNumber(r.partsCostTotal || 0);
+      repairPartsSaleTotal += safeNumber(r.partsSaleTotal || 0);
+      repairLaborIncomeTotal += safeNumber(r.laborFee || 0);
+    });
+
+    const repairPartsProfit = round2(repairPartsSaleTotal - repairPartsCostTotal);
+
+    // Brand & Model distribution
     const brandCounts = {};
     const modelCounts = {};
     soldPhones.forEach(p => {
@@ -101,6 +185,7 @@ export const reportService = {
       }
     });
 
+    // Monthly Sales
     const monthlySales = {};
     const months = ["Oca", "Şub", "Mar", "Nis", "May", "Haz", "Tem", "Ağu", "Eyl", "Eki", "Kas", "Ara"];
     
@@ -112,6 +197,7 @@ export const reportService = {
     }
 
     soldPhones.forEach(p => {
+      if (!p.salesDate) return;
       const sDate = new Date(p.salesDate);
       const key = `${months[sDate.getMonth()]} ${sDate.getFullYear().toString().substr(-2)}`;
       if (monthlySales[key]) {
@@ -137,7 +223,33 @@ export const reportService = {
       totalStockCost,
       topBrand: topBrandCount > 0 ? `${topBrand} (${topBrandCount} Adet)` : 'Satış Yok',
       topModel: topModelCount > 0 ? `${topModel} (${topModelCount} Adet)` : 'Satış Yok',
-      monthlySales: monthlySalesArray
+      monthlySales: monthlySalesArray,
+
+      // New Report Sections
+      trade: {
+        tradeCount,
+        tradeReceivedValue: round2(tradeReceivedValue),
+        tradeCollectedDiff: round2(tradeCollectedDiff),
+        tradeCustomerReceivables: round2(tradeCustomerReceivables),
+        tradeBusinessPayables: round2(tradeBusinessPayables)
+      },
+      receivables: {
+        totalCustomerReceivables: round2(totalCustomerReceivables),
+        totalSupplierPayables: round2(totalSupplierPayables),
+        totalOverdueReceivables: round2(totalOverdueReceivables),
+        monthlyCollections: round2(monthlyCollections),
+        upcomingInstallmentsTotal: round2(upcomingInstallmentsTotal)
+      },
+      parts: {
+        partsTotalPurchaseCost: round2(partsTotalPurchaseCost),
+        partsTotalPotentialSale: round2(partsTotalPotentialSale),
+        criticalPartsCount: criticalPartsList.length,
+        criticalPartsList,
+        repairPartsCostTotal: round2(repairPartsCostTotal),
+        repairPartsSaleTotal: round2(repairPartsSaleTotal),
+        repairPartsProfit,
+        repairLaborIncomeTotal: round2(repairLaborIncomeTotal)
+      }
     };
   }
 };

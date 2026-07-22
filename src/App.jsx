@@ -14,6 +14,9 @@ import RepairManager from './components/RepairManager';
 import ExpenseManager from './components/ExpenseManager';
 import Reports from './components/Reports';
 import SettingsPage from './components/Settings';
+import PartsManager from './components/PartsManager';
+import InstallmentManager from './components/InstallmentManager';
+import TradeInManager from './components/TradeInManager';
 
 export default function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -162,6 +165,12 @@ export default function App() {
             activePage={activePage}
           />
         );
+      case 'parts':
+        return <PartsManager globalSearchQuery={globalSearchQuery} />;
+      case 'installments':
+        return <InstallmentManager setActivePage={setActivePage} />;
+      case 'trades':
+        return <TradeInManager globalSearchQuery={globalSearchQuery} />;
       case 'contacts':
         return <CustomerSupplierManager activePage={activePage} globalSearchQuery={globalSearchQuery} />;
       case 'repairs':

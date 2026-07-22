@@ -13,7 +13,10 @@ import {
   Search,
   Menu,
   X,
-  User
+  User,
+  Package,
+  CreditCard,
+  Repeat
 } from 'lucide-react';
 import { settingsService } from '../db/services/settingsService';
 import { STORAGE_KEYS, getJson } from '../db/services/shared';
@@ -81,6 +84,9 @@ export default function Layout({
   const allMenuItems = [
     { id: 'dashboard', label: 'Panel', icon: LayoutDashboard },
     { id: 'phones', label: 'Stok (Cihazlar)', icon: Smartphone },
+    { id: 'parts', label: 'Parça Stok', icon: Package },
+    { id: 'installments', label: 'Taksit & Veresiye', icon: CreditCard, hideFor: ['teknisyen'] },
+    { id: 'trades', label: 'Takaslar', icon: Repeat },
     { id: 'contacts', label: 'Cari & Kişiler', icon: Users, hideFor: ['teknisyen'] },
     { id: 'repairs', label: 'Tamir Takibi', icon: Wrench },
     { id: 'expenses', label: 'Genel Giderler', icon: Receipt, hideFor: ['teknisyen'] },

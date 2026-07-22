@@ -21,12 +21,14 @@ import {
 import { repairService } from '../db/services/repairService';
 import { phoneService } from '../db/services/phoneService';
 import { customerService } from '../db/services/customerService';
+import { partService } from '../db/services/partService';
 import { escapeHtml } from '../utils/security';
 
 export default function RepairManager({ activePage, globalSearchQuery }) {
   const [repairs, setRepairs] = useState([]);
   const [phones, setPhones] = useState([]);
   const [customers, setCustomers] = useState([]);
+  const [stockParts, setStockParts] = useState([]);
   
   // Modals
   const [showAddEditModal, setShowAddEditModal] = useState(false);
@@ -45,13 +47,14 @@ export default function RepairManager({ activePage, globalSearchQuery }) {
     phoneDescription: '', 
     defect: '', 
     actionTaken: '', 
-    cost: '', // We'll keep this as a total computed cost if using parts, or manual if no parts
+    cost: '', 
     status: 'Bekliyor',
     technician: '',
     customerId: '',
     devicePassword: '',
     warrantyMonths: '',
-    spareParts: [], // { name, price }
+    spareParts: [],
+    usedParts: [],
     laborCost: ''
   });
 
@@ -61,6 +64,7 @@ export default function RepairManager({ activePage, globalSearchQuery }) {
     setRepairs(repairService.getAll());
     setPhones(phoneService.getAll().filter(p => p.status !== 'Satıldı'));
     setCustomers(customerService.getAll());
+    setStockParts(partService.getAll());
   };
 
   useEffect(() => {
@@ -139,7 +143,7 @@ export default function RepairManager({ activePage, globalSearchQuery }) {
   };
 
   // Save Form
-  const handleSaveRepair = (e) => {
+  const handleSaveRepair = async (e) => {
     e.preventDefault();
     setFormError('');
 
@@ -159,40 +163,26 @@ export default function RepairManager({ activePage, globalSearchQuery }) {
 
       // Handle new customer creation
       if (isNewCustomer && newCustomer.fullName.trim()) {
-        const newCustObj = {
-          fullName: newCustomer.fullName,
-          phone: newCustomer.phone,
-          type: 'Müşteri',
-          balance: 0,
-          transactions: []
-        };
-        const savedCustId = customerService.save(newCustObj); // save() returns true or id? wait, let's check customerService.save.
-        // If it doesn't return ID, we have to find it, or we can just push it and get the new length or generate ID here.
-        // I will generate the ID here just in case customerService.save doesn't return it:
-        newCustObj.id = `cus-${Date.now()}`;
-        customerService.save(newCustObj);
-        finalCustomerId = newCustObj.id;
+        const custObj = await customerService.findOrCreate({
+          name: newCustomer.fullName,
+          phone: newCustomer.phone
+        });
+        if (custObj) {
+          finalCustomerId = custObj.id;
+        }
       }
 
-      // Calculate total cost from parts + labor if they are used
-      let computedCost = Number(formData.cost) || 0;
-      if (formData.spareParts.length > 0 || formData.laborCost) {
-        const partsTotal = formData.spareParts.reduce((acc, part) => acc + (Number(part.price) || 0), 0);
-        const labor = Number(formData.laborCost) || 0;
-        computedCost = partsTotal + labor;
-      }
-      
-      const payload = { ...formData, cost: computedCost, customerId: finalCustomerId };
+      const payload = { ...formData, customerId: finalCustomerId };
 
       // Do not store device password persistently per security policy
       const payloadToSave = { ...payload };
       delete payloadToSave.devicePassword;
 
-      repairService.save(editingRepair ? { ...editingRepair, ...payloadToSave } : payloadToSave);
+      await repairService.save(editingRepair ? { ...editingRepair, ...payloadToSave } : payloadToSave);
       setShowAddEditModal(false);
       loadData();
     } catch (err) {
-      setFormError('Servis kaydı kaydedilirken hata oluştu.');
+      setFormError(err.message || 'Servis kaydı kaydedilirken hata oluştu.');
     }
   };
 

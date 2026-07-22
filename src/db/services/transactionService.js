@@ -1,6 +1,6 @@
-import { STORAGE_KEYS, getJson, saveJson } from './shared';
+import { STORAGE_KEYS, getJson, saveJson, generateUUID, safeNumber } from './shared';
 
-export const getTransactionService = () => ({
+export const transactionService = {
   getAll: () => {
     return getJson(STORAGE_KEYS.TRANSACTIONS, []);
   },
@@ -9,29 +9,46 @@ export const getTransactionService = () => ({
     const transactions = getJson(STORAGE_KEYS.TRANSACTIONS, []);
     return transactions
       .filter(t => t.contactId === contactId)
-      .sort((a, b) => new Date(b.date) - new Date(a.date));
+      .sort((a, b) => new Date(b.date || Date.now()) - new Date(a.date || Date.now()));
   },
 
-  save: (transactionData) => {
+  save: async (transactionData) => {
     const transactions = getJson(STORAGE_KEYS.TRANSACTIONS, []);
+
+    // Check operationId / sourceId duplicate prevention if provided
+    if (transactionData.operationId && transactionData.type) {
+      const existing = transactions.find(t => 
+        t.operationId === transactionData.operationId && t.type === transactionData.type
+      );
+      if (existing) {
+        return existing;
+      }
+    }
+
     let updated;
+    const cleanAmount = safeNumber(transactionData.amount);
+
     if (transactionData.id) {
-      updated = transactions.map(t => t.id === transactionData.id ? { ...t, ...transactionData } : t);
+      updated = transactions.map(t => t.id === transactionData.id ? { ...t, ...transactionData, amount: cleanAmount } : t);
     } else {
       const newTr = {
         ...transactionData,
-        id: `tr-${Date.now()}`,
-        date: transactionData.date || new Date().toISOString().split('T')[0]
+        id: transactionData.id || generateUUID(),
+        amount: cleanAmount,
+        date: transactionData.date || new Date().toISOString().split('T')[0],
+        createdAt: new Date().toISOString()
       };
       updated = [newTr, ...transactions];
     }
-    saveJson(STORAGE_KEYS.TRANSACTIONS, updated);
+    await saveJson(STORAGE_KEYS.TRANSACTIONS, updated);
     return true;
   },
 
-  delete: (id) => {
+  delete: async (id) => {
     const transactions = getJson(STORAGE_KEYS.TRANSACTIONS, []);
-    saveJson(STORAGE_KEYS.TRANSACTIONS, transactions.filter(t => t.id !== id));
+    await saveJson(STORAGE_KEYS.TRANSACTIONS, transactions.filter(t => t.id !== id));
     return true;
   }
-});
+};
+
+export const getTransactionService = () => transactionService;
