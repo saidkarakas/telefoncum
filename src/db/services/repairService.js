@@ -23,14 +23,15 @@ export const repairService = {
 
       // Unify laborCost and laborFee (Requirement 14)
       const laborFee = validateNonNegative(
-        repairData.laborFee !== undefined ? repairData.laborFee : (repairData.laborCost || 0),
+        repairData.laborFee !== undefined && repairData.laborFee !== '' ? repairData.laborFee : (repairData.laborCost || 0),
         'İşçilik Ücreti'
       );
 
-      // Support legacy spareParts [{ name, price }] and convert to usedParts if needed
+      // Support legacy spareParts/parts [{ name, price }] and convert to usedParts if needed
       let rawParts = repairData.usedParts || [];
-      if ((!rawParts || rawParts.length === 0) && repairData.spareParts && repairData.spareParts.length > 0) {
-        rawParts = repairData.spareParts.map(p => ({
+      const legacyParts = repairData.spareParts || repairData.parts || [];
+      if ((!rawParts || rawParts.length === 0) && legacyParts && legacyParts.length > 0) {
+        rawParts = legacyParts.map(p => ({
           partId: p.partId || '',
           nameSnapshot: p.name || 'Parça',
           quantity: 1,
@@ -105,11 +106,19 @@ export const repairService = {
         }
       }
 
-      // 5. Calculate totals
+      // 5. Calculate totals (Requirement 4: Empty string cost does NOT zero out calculated total)
       const partsCostTotal = newUsedParts.reduce((sum, p) => sum + round2(p.quantity * p.unitCostSnapshot), 0);
       const partsSaleTotal = newUsedParts.reduce((sum, p) => sum + p.lineTotal, 0);
       const calculatedTotal = round2(partsSaleTotal + laborFee);
-      const totalCost = repairData.cost !== undefined ? validateNonNegative(repairData.cost, 'Servis Masrafı') : calculatedTotal;
+
+      const hasManualCost =
+        repairData.cost !== undefined &&
+        repairData.cost !== null &&
+        String(repairData.cost).trim() !== '';
+
+      const totalCost = hasManualCost
+        ? validateNonNegative(repairData.cost, 'Servis Tutarı')
+        : calculatedTotal;
 
       const updatedRepairData = {
         ...repairData,
@@ -121,7 +130,7 @@ export const repairService = {
         partsCostTotal,
         partsSaleTotal,
         cost: totalCost,
-        totalPrice: repairData.totalPrice !== undefined ? parseNumber(repairData.totalPrice) : calculatedTotal,
+        totalPrice: (repairData.totalPrice !== undefined && repairData.totalPrice !== '' && repairData.totalPrice !== null) ? parseNumber(repairData.totalPrice) : totalCost,
         updatedAt: new Date().toISOString()
       };
 
@@ -167,8 +176,8 @@ export const repairService = {
         await saveJson(STORAGE_KEYS.PHONES, updatedPhones);
       }
 
-      // 7. Record cash movement if repair delivered and paid
-      if (repairData.status === 'Teslim Edildi' && totalCost > 0 && (!oldRepair || oldRepair.status !== 'Teslim Edildi')) {
+      // 7. Requirement 13: Update or record cash movement if repair delivered and paid
+      if (repairData.status === 'Teslim Edildi' && totalCost > 0) {
         await cashMovementService.save({
           operationId: `${repairId}-cash`,
           direction: 'in',
@@ -207,6 +216,9 @@ export const repairService = {
           }
         }
       }
+
+      // Requirement 13 & 16: Refund/delete linked cash movement for repair
+      await cashMovementService.deleteByOperationId(`${id}-cash`);
 
       await saveJson(STORAGE_KEYS.REPAIRS, repairs.filter(r => r.id !== id));
       

@@ -3,27 +3,22 @@ import {
   Plus, 
   Trash2, 
   Receipt, 
-  Calendar, 
   AlertCircle,
   X,
-  PieChart,
-  ChevronDown
+  PieChart
 } from 'lucide-react';
 import { expenseService } from '../db/services/expenseService';
 
 export default function ExpenseManager({ activePage, globalSearchQuery }) {
   const [expenses, setExpenses] = useState([]);
-  
-  // Modals
   const [showAddModal, setShowAddModal] = useState(false);
-  
-  // Filters
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [categoryFilter, setCategoryFilter] = useState('');
 
-  // Form State
   const [formData, setFormData] = useState({
-    category: 'Kira', // Kira, Elektrik, İnternet, Yakıt, Kargo, Malzeme, Diğer
+    category: 'Kira',
     amount: '',
+    paymentMethod: 'Nakit',
     date: new Date().toISOString().split('T')[0],
     description: ''
   });
@@ -40,11 +35,9 @@ export default function ExpenseManager({ activePage, globalSearchQuery }) {
     return () => window.removeEventListener('tys_db_update', loadData);
   }, [activePage]);
 
-  // Filtered List
   const getFilteredExpenses = () => {
     let list = expenses;
 
-    // Search query
     if (globalSearchQuery && globalSearchQuery.trim() !== '') {
       const q = globalSearchQuery.toLowerCase().trim();
       list = list.filter(e => 
@@ -53,7 +46,6 @@ export default function ExpenseManager({ activePage, globalSearchQuery }) {
       );
     }
 
-    // Category filter
     if (categoryFilter) {
       list = list.filter(e => e.category === categoryFilter);
     }
@@ -63,9 +55,10 @@ export default function ExpenseManager({ activePage, globalSearchQuery }) {
 
   const filteredExpenses = getFilteredExpenses();
 
-  // Save Expense
-  const handleSaveExpense = (e) => {
+  // Requirement 7 & 13: async save handler
+  const handleSaveExpense = async (e) => {
     e.preventDefault();
+    if (isSubmitting) return;
     setFormError('');
 
     if (!formData.amount || Number(formData.amount) <= 0) {
@@ -78,31 +71,35 @@ export default function ExpenseManager({ activePage, globalSearchQuery }) {
     }
 
     try {
-      expenseService.save({
+      setIsSubmitting(true);
+      await expenseService.save({
         ...formData,
         amount: Number(formData.amount)
       });
       setShowAddModal(false);
       loadData();
     } catch (err) {
-      setFormError('Gider kaydedilemedi.');
+      setFormError(err.message || 'Gider kaydedilemedi.');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
-  // Delete Expense
-  const handleDeleteExpense = (id) => {
+  // Requirement 7 & 13: async delete handler
+  const handleDeleteExpense = async (id) => {
     if (confirm('Bu genel gider kaydını silmek istediğinize emin misiniz?')) {
-      expenseService.delete(id);
-      loadData();
+      try {
+        await expenseService.delete(id);
+        loadData();
+      } catch (err) {
+        alert(err.message || 'Gider kaydı silinemedi.');
+      }
     }
   };
 
-  // Summary calculations
   const totalAmount = filteredExpenses.reduce((sum, e) => sum + e.amount, 0);
-
   const categories = ['Kira', 'Elektrik', 'İnternet', 'Yakıt', 'Kargo', 'Malzeme', 'Diğer'];
 
-  // Categories breakdowns for inline bars
   const categorySummary = {};
   categories.forEach(cat => { categorySummary[cat] = 0; });
   expenses.forEach(e => {
@@ -115,12 +112,9 @@ export default function ExpenseManager({ activePage, globalSearchQuery }) {
 
   const grandTotalAllTime = Object.values(categorySummary).reduce((a, b) => a + b, 0);
 
-  // AI Smart Expense Estimation (Madde 47)
   const calculateAiEstimation = () => {
-    // Only care about recurring ones
     const recurringCats = ['Kira', 'Elektrik', 'İnternet'];
     const now = new Date();
-    // Look at last 3 full months
     const threeMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 3, 1);
     
     let totalRecurring = 0;
@@ -136,7 +130,6 @@ export default function ExpenseManager({ activePage, globalSearchQuery }) {
       }
     });
 
-    // Average per month
     const distinctMonths = monthsCounted.size > 0 ? monthsCounted.size : 1;
     return Math.round(totalRecurring / distinctMonths);
   };
@@ -144,7 +137,7 @@ export default function ExpenseManager({ activePage, globalSearchQuery }) {
   const aiEstimation = calculateAiEstimation();
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 text-xs">
       
       {aiEstimation > 0 && (
         <div className="p-3 bg-indigo-50 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-900 rounded-xl flex items-center justify-between text-indigo-700 dark:text-indigo-400 text-xs shadow-sm">
@@ -160,8 +153,6 @@ export default function ExpenseManager({ activePage, globalSearchQuery }) {
 
       {/* SUMMARY DASHBOARD METRICS */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        
-        {/* Left Side: Summary Total */}
         <div className="p-5 bg-gradient-to-br from-indigo-500/10 to-purple-500/10 border border-indigo-100 dark:border-indigo-900/40 rounded-2xl flex flex-col justify-between shadow-sm">
           <div>
             <span className="text-[10px] uppercase font-bold text-slate-500">Seçili Listelenen Gider</span>
@@ -174,7 +165,6 @@ export default function ExpenseManager({ activePage, globalSearchQuery }) {
           </span>
         </div>
 
-        {/* Right Side: Category Breakdown Bars (2 grid widths) */}
         <div className="md:col-span-2 p-5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-sm space-y-3">
           <h4 className="font-bold uppercase tracking-wider text-[10px] text-slate-450 flex items-center gap-1">
             <PieChart size={14} className="text-teal-500" />
@@ -202,13 +192,10 @@ export default function ExpenseManager({ activePage, globalSearchQuery }) {
             })}
           </div>
         </div>
-
       </div>
 
       {/* FILTER BUTTONS & ADD BUTTON ROW */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 no-print">
-        
-        {/* Category Filters */}
         <div className="flex bg-slate-100 dark:bg-slate-900 p-1 rounded-xl border border-slate-200 dark:border-slate-800 flex-wrap gap-1">
           <button
             onClick={() => setCategoryFilter('')}
@@ -235,12 +222,12 @@ export default function ExpenseManager({ activePage, globalSearchQuery }) {
           ))}
         </div>
 
-        {/* Add Button */}
         <button
           onClick={() => {
             setFormData({
               category: 'Kira',
               amount: '',
+              paymentMethod: 'Nakit',
               date: new Date().toISOString().split('T')[0],
               description: ''
             });
@@ -262,46 +249,40 @@ export default function ExpenseManager({ activePage, globalSearchQuery }) {
               <tr className="bg-slate-50 dark:bg-slate-850/50 border-b border-slate-200 dark:border-slate-800 text-slate-500 uppercase font-bold tracking-wider">
                 <th className="p-4 py-3.5">Kategori</th>
                 <th className="p-4 py-3.5">İşlem Açıklaması</th>
+                <th className="p-4 py-3.5">Ödeme Türü</th>
                 <th className="p-4 py-3.5">Gider Tarihi</th>
                 <th className="p-4 py-3.5 text-right">Tutar</th>
                 <th className="p-4 py-3.5 text-center no-print">Sil</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60">
+            <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-medium">
               {filteredExpenses.length === 0 ? (
                 <tr>
-                  <td colSpan="5" className="p-8 text-center text-slate-400 font-medium">
+                  <td colSpan="6" className="p-8 text-center text-slate-400 font-medium">
                     Kayıtlı genel gider bulunmamaktadır.
                   </td>
                 </tr>
               ) : (
                 filteredExpenses.map((exp) => (
                   <tr key={exp.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-850/30 transition-colors">
-                    
-                    {/* Category */}
                     <td className="p-4 font-bold">
                       <span className="inline-flex items-center gap-1.5">
                         <span className="w-2.5 h-2.5 rounded-full bg-indigo-500"></span>
                         {exp.category}
                       </span>
                     </td>
-
-                    {/* Description */}
                     <td className="p-4 text-slate-700 dark:text-slate-350">
                       {exp.description}
                     </td>
-
-                    {/* Date */}
+                    <td className="p-4 text-slate-600 font-semibold">
+                      {exp.paymentMethod || 'Nakit'}
+                    </td>
                     <td className="p-4 text-slate-500">
                       {new Date(exp.date).toLocaleDateString('tr-TR')}
                     </td>
-
-                    {/* Amount */}
                     <td className="p-4 text-right font-bold text-red-500 text-sm">
                       {exp.amount.toLocaleString('tr-TR')} TL
                     </td>
-
-                    {/* Actions */}
                     <td className="p-4 text-center no-print">
                       <button
                         onClick={() => handleDeleteExpense(exp.id)}
@@ -311,7 +292,6 @@ export default function ExpenseManager({ activePage, globalSearchQuery }) {
                         <Trash2 size={13} />
                       </button>
                     </td>
-
                   </tr>
                 ))
               )}
@@ -324,7 +304,6 @@ export default function ExpenseManager({ activePage, globalSearchQuery }) {
       {showAddModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-in fade-in duration-100">
           <div className="bg-white dark:bg-slate-900 border border-slate-250 dark:border-slate-800 rounded-2xl shadow-xl max-w-sm w-full animate-in zoom-in-95 duration-100 text-xs">
-            
             <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center bg-slate-50 dark:bg-slate-900/50">
               <h3 className="font-bold uppercase tracking-wider text-slate-850 dark:text-white flex items-center gap-1">
                 <Receipt size={16} className="text-indigo-600" />
@@ -343,13 +322,12 @@ export default function ExpenseManager({ activePage, globalSearchQuery }) {
                 </div>
               )}
 
-              {/* Category Select */}
               <div className="space-y-1">
                 <label className="font-semibold text-slate-500 uppercase tracking-wide">Gider Kategorisi</label>
                 <select
                   value={formData.category}
                   onChange={(e) => setFormData(prev => ({ ...prev, category: e.target.value }))}
-                  className="w-full p-2.5 border border-slate-200 dark:border-slate-800 rounded-xl bg-transparent"
+                  className="w-full p-2.5 border border-slate-200 dark:border-slate-800 rounded-xl bg-transparent font-bold"
                 >
                   <option value="Kira">Kira</option>
                   <option value="Elektrik">Elektrik</option>
@@ -361,12 +339,25 @@ export default function ExpenseManager({ activePage, globalSearchQuery }) {
                 </select>
               </div>
 
-              {/* Amount */}
+              <div className="space-y-1">
+                <label className="font-semibold text-slate-500 uppercase tracking-wide">Ödeme Yöntemi</label>
+                <select
+                  value={formData.paymentMethod}
+                  onChange={(e) => setFormData(prev => ({ ...prev, paymentMethod: e.target.value }))}
+                  className="w-full p-2.5 border border-slate-200 dark:border-slate-800 rounded-xl bg-transparent font-bold"
+                >
+                  <option value="Nakit">Nakit (Kasadan Çıkış)</option>
+                  <option value="Havale/EFT">Havale / EFT (Banka)</option>
+                  <option value="Kart">Kredi Kartı</option>
+                </select>
+              </div>
+
               <div className="space-y-1">
                 <label className="font-semibold text-slate-500 uppercase tracking-wide">Tutar *</label>
                 <div className="relative">
                   <input
                     type="number"
+                    min="0"
                     placeholder="Gider tutarı"
                     value={formData.amount}
                     onChange={(e) => setFormData(prev => ({ ...prev, amount: e.target.value }))}
@@ -377,19 +368,17 @@ export default function ExpenseManager({ activePage, globalSearchQuery }) {
                 </div>
               </div>
 
-              {/* Date */}
               <div className="space-y-1">
                 <label className="font-semibold text-slate-500 uppercase tracking-wide">Gider Tarihi</label>
                 <input
                   type="date"
                   value={formData.date}
                   onChange={(e) => setFormData(prev => ({ ...prev, date: e.target.value }))}
-                  className="w-full p-2.5 border border-slate-200 dark:border-slate-800 rounded-xl bg-transparent"
+                  className="w-full p-2.5 border border-slate-200 dark:border-slate-800 rounded-xl bg-transparent font-bold"
                   required
                 />
               </div>
 
-              {/* Description */}
               <div className="space-y-1">
                 <label className="font-semibold text-slate-500 uppercase tracking-wide">Açıklama / Detay *</label>
                 <input
@@ -402,7 +391,6 @@ export default function ExpenseManager({ activePage, globalSearchQuery }) {
                 />
               </div>
 
-              {/* Buttons */}
               <div className="flex justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
                 <button
                   type="button"
@@ -413,12 +401,12 @@ export default function ExpenseManager({ activePage, globalSearchQuery }) {
                 </button>
                 <button
                   type="submit"
-                  className="px-3.5 py-2 bg-indigo-650 hover:bg-indigo-700 text-white font-semibold rounded-xl cursor-pointer"
+                  disabled={isSubmitting}
+                  className="px-3.5 py-2 bg-indigo-650 hover:bg-indigo-700 text-white font-semibold rounded-xl cursor-pointer disabled:opacity-50"
                 >
-                  Kaydet
+                  {isSubmitting ? 'Kaydediliyor...' : 'Kaydet'}
                 </button>
               </div>
-
             </form>
           </div>
         </div>

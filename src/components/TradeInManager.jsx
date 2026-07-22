@@ -4,11 +4,9 @@ import {
   Search,
   Printer,
   X,
-  Smartphone,
-  User,
+  Plus,
   ArrowRight,
-  ShieldCheck,
-  CheckCircle2
+  AlertCircle
 } from 'lucide-react';
 import { tradeInService } from '../db/services/tradeInService';
 import { phoneService } from '../db/services/phoneService';
@@ -24,6 +22,37 @@ export default function TradeInManager({ globalSearchQuery }) {
   // Detail Modal
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [selectedTrade, setSelectedTrade] = useState(null);
+
+  // New Trade Modal State (Requirement 2)
+  const [isNewTradeOpen, setIsNewTradeOpen] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [formError, setFormError] = useState('');
+
+  const [isNewCustomer, setIsNewCustomer] = useState(false);
+  const [selectedCustomerId, setSelectedCustomerId] = useState('');
+  const [newCustomerData, setNewCustomerData] = useState({ fullName: '', phone: '' });
+
+  const [soldPhoneId, setSoldPhoneId] = useState('');
+  const [soldPhonePrice, setSoldPhonePrice] = useState('');
+  const [receivedPhoneValue, setReceivedPhoneValue] = useState('');
+  const [paidAmount, setPaidAmount] = useState('');
+  const [paymentType, setPaymentType] = useState('Nakit');
+  const [installmentCount, setInstallmentCount] = useState(3);
+  const [installmentStartDate, setInstallmentStartDate] = useState(new Date().toISOString().split('T')[0]);
+  const [notes, setNotes] = useState('');
+
+  const [receivedPhoneData, setReceivedPhoneData] = useState({
+    brand: 'Apple',
+    model: '',
+    imei1: '',
+    imei2: '',
+    serialNumber: '',
+    color: '',
+    storage: '128 GB',
+    cosmeticStatus: 'İyi',
+    defects: '',
+    description: ''
+  });
 
   const loadData = () => {
     setTradeIns(tradeInService.getAll());
@@ -43,6 +72,104 @@ export default function TradeInManager({ globalSearchQuery }) {
     }
   }, [globalSearchQuery]);
 
+  const stockPhones = phones.filter(p => p.status === 'Stokta');
+
+  const handleOpenNewTrade = () => {
+    setFormError('');
+    setIsSubmitting(false);
+    setIsNewCustomer(false);
+    setSelectedCustomerId('');
+    setNewCustomerData({ fullName: '', phone: '' });
+    setSoldPhoneId('');
+    setSoldPhonePrice('');
+    setReceivedPhoneValue('');
+    setPaidAmount('');
+    setPaymentType('Nakit');
+    setInstallmentCount(3);
+    setInstallmentStartDate(new Date().toISOString().split('T')[0]);
+    setNotes('');
+    setReceivedPhoneData({
+      brand: 'Apple',
+      model: '',
+      imei1: '',
+      imei2: '',
+      serialNumber: '',
+      color: '',
+      storage: '128 GB',
+      cosmeticStatus: 'İyi',
+      defects: '',
+      description: ''
+    });
+    setIsNewTradeOpen(true);
+  };
+
+  const handleSoldPhoneSelect = (pId) => {
+    setSoldPhoneId(pId);
+    const p = stockPhones.find(item => item.id === pId);
+    if (p) {
+      setSoldPhonePrice(p.salesPrice || p.purchasePrice * 1.25 || '');
+    }
+  };
+
+  // Requirement 2: Submit processTradeIn call
+  const handleSaveTradeIn = async (e) => {
+    e.preventDefault();
+    if (isSubmitting) return;
+    setFormError('');
+
+    if (!soldPhoneId) {
+      setFormError('Lütfen takasta müşteriye verilecek stok telefonunu seçin.');
+      return;
+    }
+    if (!soldPhonePrice || Number(soldPhonePrice) <= 0) {
+      setFormError('Lütfen geçerli bir satılan telefon fiyatı girin.');
+      return;
+    }
+    if (!receivedPhoneData.brand || !receivedPhoneData.model) {
+      setFormError('Takasa alınacak telefonun marka ve modelini girin.');
+      return;
+    }
+    if (!receivedPhoneValue || Number(receivedPhoneValue) <= 0) {
+      setFormError('Lütfen takasa alınacak cihaza biçilen değeri girin.');
+      return;
+    }
+
+    if (isNewCustomer && (!newCustomerData.fullName.trim() || !newCustomerData.phone.trim())) {
+      setFormError('Yeni müşteri adı ve telefon numarası zorunludur.');
+      return;
+    }
+    if (!isNewCustomer && !selectedCustomerId) {
+      setFormError('Lütfen takas yapacak müşteriyi seçin.');
+      return;
+    }
+
+    const payload = {
+      soldPhoneId,
+      soldPhonePrice: Number(soldPhonePrice),
+      receivedPhoneValue: Number(receivedPhoneValue),
+      paidAmount: paidAmount ? Number(paidAmount) : 0,
+      paymentType,
+      installmentCount: Number(installmentCount),
+      installmentStartDate,
+      notes,
+      customerId: isNewCustomer ? null : selectedCustomerId,
+      customerData: isNewCustomer ? { name: newCustomerData.fullName, fullName: newCustomerData.fullName, phone: newCustomerData.phone } : null,
+      receivedPhoneData
+    };
+
+    try {
+      setIsSubmitting(true);
+      // Requirement 2: Save button directly awaits tradeInService.processTradeIn(payload)
+      await tradeInService.processTradeIn(payload);
+      setIsNewTradeOpen(false);
+      loadData();
+    } catch (err) {
+      setFormError(err.message || 'Takas kaydı oluşturulurken hata oluştu.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   // Filter Trades
   const filteredTrades = tradeIns.filter(t => {
     const custName = t.customerName || '';
@@ -57,7 +184,7 @@ export default function TradeInManager({ globalSearchQuery }) {
     );
   });
 
-  // Calculate Metrics
+  // Metrics
   const totalTradeCount = tradeIns.length;
   const totalReceivedValue = tradeIns.reduce((sum, t) => sum + (t.receivedPhoneValue || 0), 0);
   const totalCollectedDiff = tradeIns.reduce((sum, t) => sum + (t.paidAmount || 0), 0);
@@ -67,11 +194,6 @@ export default function TradeInManager({ globalSearchQuery }) {
   const totalBusinessPayables = tradeIns
     .filter(t => t.differenceDirection === 'business_owes')
     .reduce((sum, t) => sum + (t.remainingAmount || 0), 0);
-
-  const handleOpenDetail = (trade) => {
-    setSelectedTrade(trade);
-    setIsDetailOpen(true);
-  };
 
   const handlePrintContract = (trade) => {
     const printWindow = window.open('', '_blank');
@@ -124,7 +246,7 @@ export default function TradeInManager({ globalSearchQuery }) {
           <div class="box">
             <h4>Müşteri (Devreden) Bilgileri</h4>
             <table>
-              <tr><td class="label">Adı Soyadı:</td><td class="val">${escapeHtml(cust.name || trade.customerName)}</td></tr>
+              <tr><td class="label">Adı Soyadı:</td><td class="val">${escapeHtml(cust.fullName || cust.name || trade.customerName)}</td></tr>
               <tr><td class="label">Telefon:</td><td class="val">${escapeHtml(cust.phone || '-')}</td></tr>
               <tr><td class="label">Adres:</td><td class="val">${escapeHtml(cust.address || '-')}</td></tr>
             </table>
@@ -215,20 +337,30 @@ export default function TradeInManager({ globalSearchQuery }) {
     printWindow.document.close();
   };
 
-  return (
-    <div className="space-y-6">
+  const diffVal = Number(soldPhonePrice || 0) - Number(receivedPhoneValue || 0);
 
-      {/* Header */}
+  return (
+    <div className="space-y-6 text-xs">
+
+      {/* Header with New Trade Button */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h2 className="text-xl font-bold font-display text-slate-900 dark:text-white flex items-center gap-2">
             <Repeat className="text-teal-500" size={24} />
-            Takas İşlemleri Geçmişi
+            Takas İşlemleri Yönetimi
           </h2>
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            Sistemde gerçekleşen telefon takaslarını ve takas sözleşmelerini inceleyin.
+            Telefon takaslarını yapın, alınan cihazları stoğa ekleyin ve sözleşmeleri yazdırın.
           </p>
         </div>
+
+        <button
+          onClick={handleOpenNewTrade}
+          className="px-4 py-2.5 bg-teal-500 hover:bg-teal-600 text-slate-950 font-bold rounded-xl shadow-lg shadow-teal-500/20 flex items-center justify-center gap-2 cursor-pointer"
+        >
+          <Plus size={16} />
+          Yeni Takas İşlemi
+        </button>
       </div>
 
       {/* Stats Cards */}
@@ -365,6 +497,282 @@ export default function TradeInManager({ globalSearchQuery }) {
           </table>
         </div>
       </div>
+
+      {/* NEW TRADE MODAL (Requirement 2) */}
+      {isNewTradeOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm overflow-y-auto">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl w-full max-w-2xl p-6 shadow-2xl space-y-4 max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3">
+              <h3 className="font-bold font-display text-base text-slate-900 dark:text-white flex items-center gap-2">
+                <Repeat className="text-teal-500" size={20} />
+                Yeni Takas İşlemi Oluştur
+              </h3>
+              <button onClick={() => setIsNewTradeOpen(false)} className="text-slate-400 hover:text-white cursor-pointer">
+                <X size={18} />
+              </button>
+            </div>
+
+            {formError && (
+              <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-600 dark:text-rose-400 text-xs font-semibold flex items-center gap-2">
+                <AlertCircle size={16} />
+                <span>{formError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleSaveTradeIn} className="flex-1 overflow-y-auto space-y-4 pr-1">
+              
+              {/* 1. Sold Phone Selection */}
+              <div className="p-3 bg-slate-50 dark:bg-slate-950 rounded-xl space-y-3 border border-slate-200 dark:border-slate-800">
+                <h4 className="font-bold text-slate-800 dark:text-slate-200 text-xs uppercase tracking-wide">1. Müşteriye Verilen Cihaz (Stoktan) *</h4>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-slate-500 mb-1 font-semibold">Stoktaki Cihaz *</label>
+                    <select
+                      value={soldPhoneId}
+                      onChange={(e) => handleSoldPhoneSelect(e.target.value)}
+                      className="w-full p-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-bold"
+                      required
+                    >
+                      <option value="">-- Cihaz Seçin --</option>
+                      {stockPhones.map(p => (
+                        <option key={p.id} value={p.id}>{p.brand} {p.model} ({p.storage} - IMEI: {p.imei1 || 'Yok'})</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-slate-500 mb-1 font-semibold">Verilen Cihaz Satış Fiyatı (TL) *</label>
+                    <input
+                      type="number"
+                      min="0"
+                      required
+                      value={soldPhonePrice}
+                      onChange={(e) => setSoldPhonePrice(e.target.value)}
+                      className="w-full p-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-bold"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* 2. Customer Selection */}
+              <div className="p-3 bg-slate-50 dark:bg-slate-950 rounded-xl space-y-3 border border-slate-200 dark:border-slate-800">
+                <div className="flex justify-between items-center">
+                  <h4 className="font-bold text-slate-800 dark:text-slate-200 text-xs uppercase tracking-wide">2. Müşteri Bilgileri *</h4>
+                  <label className="flex items-center gap-1.5 cursor-pointer text-xs font-semibold text-teal-600">
+                    <input
+                      type="checkbox"
+                      checked={isNewCustomer}
+                      onChange={(e) => setIsNewCustomer(e.target.checked)}
+                      className="rounded border-slate-300"
+                    />
+                    Yeni Müşteri Oluştur
+                  </label>
+                </div>
+
+                {!isNewCustomer ? (
+                  <div>
+                    <select
+                      value={selectedCustomerId}
+                      onChange={(e) => setSelectedCustomerId(e.target.value)}
+                      className="w-full p-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-bold"
+                    >
+                      <option value="">-- Mevcut Müşteri Seçin --</option>
+                      {customers.map(c => (
+                        <option key={c.id} value={c.id}>{c.fullName || c.name} ({c.phone || 'Tel Yok'})</option>
+                      ))}
+                    </select>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-slate-500 mb-1">Müşteri Ad Soyad *</label>
+                      <input
+                        type="text"
+                        value={newCustomerData.fullName}
+                        onChange={(e) => setNewCustomerData(prev => ({ ...prev, fullName: e.target.value }))}
+                        className="w-full p-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 font-bold"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-slate-500 mb-1">Telefon Numarası *</label>
+                      <input
+                        type="text"
+                        value={newCustomerData.phone}
+                        onChange={(e) => setNewCustomerData(prev => ({ ...prev, phone: e.target.value }))}
+                        className="w-full p-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 font-bold"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* 3. Received Phone Details */}
+              <div className="p-3 bg-slate-50 dark:bg-slate-950 rounded-xl space-y-3 border border-slate-200 dark:border-slate-800">
+                <h4 className="font-bold text-slate-800 dark:text-slate-200 text-xs uppercase tracking-wide">3. Müşteriden Alınan Cihaz (Takas) *</h4>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-slate-500 mb-1">Marka *</label>
+                    <input
+                      type="text"
+                      required
+                      value={receivedPhoneData.brand}
+                      onChange={(e) => setReceivedPhoneData(prev => ({ ...prev, brand: e.target.value }))}
+                      className="w-full p-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 font-bold"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-500 mb-1">Model *</label>
+                    <input
+                      type="text"
+                      required
+                      value={receivedPhoneData.model}
+                      onChange={(e) => setReceivedPhoneData(prev => ({ ...prev, model: e.target.value }))}
+                      className="w-full p-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 font-bold"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-500 mb-1">IMEI 1</label>
+                    <input
+                      type="text"
+                      value={receivedPhoneData.imei1}
+                      onChange={(e) => setReceivedPhoneData(prev => ({ ...prev, imei1: e.target.value }))}
+                      className="w-full p-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 font-bold font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-500 mb-1">IMEI 2</label>
+                    <input
+                      type="text"
+                      value={receivedPhoneData.imei2}
+                      onChange={(e) => setReceivedPhoneData(prev => ({ ...prev, imei2: e.target.value }))}
+                      className="w-full p-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 font-bold font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-500 mb-1">Seri No</label>
+                    <input
+                      type="text"
+                      value={receivedPhoneData.serialNumber}
+                      onChange={(e) => setReceivedPhoneData(prev => ({ ...prev, serialNumber: e.target.value }))}
+                      className="w-full p-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 font-bold"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-500 mb-1">Takas Biçilen Değer (TL) *</label>
+                    <input
+                      type="number"
+                      min="0"
+                      required
+                      value={receivedPhoneValue}
+                      onChange={(e) => setReceivedPhoneValue(e.target.value)}
+                      className="w-full p-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-teal-600 font-bold"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* 4. Accounting & Payment Method */}
+              <div className="p-3 bg-slate-50 dark:bg-slate-950 rounded-xl space-y-3 border border-slate-200 dark:border-slate-800">
+                <div className="flex justify-between items-center">
+                  <h4 className="font-bold text-slate-800 dark:text-slate-200 text-xs uppercase tracking-wide">4. Fark Hesabı ve Ödeme</h4>
+                  <div className="font-bold font-mono text-xs">
+                    Fark: <span className={diffVal > 0 ? 'text-amber-500' : diffVal < 0 ? 'text-rose-500' : 'text-emerald-500'}>
+                      {Math.abs(diffVal).toLocaleString('tr-TR')} TL ({diffVal > 0 ? 'Müşteri Ödeyecek' : diffVal < 0 ? 'İşletme Ödeyecek' : 'Başa Baş'})
+                    </span>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-slate-500 mb-1">Peşin Ödenen/Alınan Tutarı (TL)</label>
+                    <input
+                      type="number"
+                      min="0"
+                      value={paidAmount}
+                      onChange={(e) => setPaidAmount(e.target.value)}
+                      className="w-full p-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 font-bold"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-500 mb-1">Ödeme Türü</label>
+                    <select
+                      value={paymentType}
+                      onChange={(e) => setPaymentType(e.target.value)}
+                      className="w-full p-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 font-bold"
+                    >
+                      <option value="Nakit">Nakit</option>
+                      <option value="Havale/EFT">Havale / EFT</option>
+                      <option value="Kart">Kredi Kartı</option>
+                      <option value="Veresiye">Veresiye</option>
+                      <option value="Taksit">Taksit</option>
+                    </select>
+                  </div>
+
+                  {paymentType === 'Taksit' && (
+                    <>
+                      <div>
+                        <label className="block text-slate-500 mb-1">Taksit Sayısı</label>
+                        <select
+                          value={installmentCount}
+                          onChange={(e) => setInstallmentCount(e.target.value)}
+                          className="w-full p-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 font-bold"
+                        >
+                          <option value="2">2 Taksit</option>
+                          <option value="3">3 Taksit</option>
+                          <option value="4">4 Taksit</option>
+                          <option value="6">6 Taksit</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-slate-500 mb-1">İlk Vade Tarihi</label>
+                        <input
+                          type="date"
+                          value={installmentStartDate}
+                          onChange={(e) => setInstallmentStartDate(e.target.value)}
+                          className="w-full p-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 font-bold"
+                        />
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block text-slate-500 mb-1">Takas Notu / Kusurlar</label>
+                  <textarea
+                    value={notes}
+                    onChange={(e) => setNotes(e.target.value)}
+                    rows="2"
+                    placeholder="Ekran çiziği, şarj soket durumu vb..."
+                    className="w-full p-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900"
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-3 border-t border-slate-200 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setIsNewTradeOpen(false)}
+                  className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold cursor-pointer"
+                >
+                  Vazgeç
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="px-5 py-2 rounded-xl bg-teal-500 text-slate-950 font-bold hover:bg-teal-400 transition cursor-pointer disabled:opacity-50 flex items-center gap-1.5"
+                >
+                  {isSubmitting ? (
+                    <span>İşlem Kaydediliyor...</span>
+                  ) : (
+                    <span>Takas Kaydını Tamamla</span>
+                  )}
+                </button>
+              </div>
+
+            </form>
+          </div>
+        </div>
+      )}
 
     </div>
   );

@@ -129,7 +129,7 @@ export default function CustomerSupplierManager({ activePage, globalSearchQuery 
   };
 
   // Save Contact
-  const handleSaveContact = (e) => {
+  const handleSaveContact = async (e) => {
     e.preventDefault();
     setFormError('');
 
@@ -141,26 +141,29 @@ export default function CustomerSupplierManager({ activePage, globalSearchQuery 
     const service = activeTab === 'customers' ? customerService : supplierService;
     
     try {
-      service.save(editingContact ? { ...editingContact, ...contactForm } : contactForm);
+      await service.save(editingContact ? { ...editingContact, ...contactForm } : contactForm);
       setShowAddEditModal(false);
       loadData();
     } catch (err) {
-      setFormError('Kaydedilirken bir hata meydana geldi.');
+      setFormError(err.message || 'Kaydedilirken bir hata meydana geldi.');
     }
   };
 
   // Delete Contact
-  const handleDeleteContact = (id) => {
+  const handleDeleteContact = async (id) => {
     if (confirm('Bu kişiyi ve ona bağlı tüm cari hareketleri silmek istediğinize emin misiniz?')) {
       const service = activeTab === 'customers' ? customerService : supplierService;
-      service.delete(id);
-      loadData();
+      try {
+        await service.delete(id);
+        loadData();
+      } catch (err) {
+        alert(err.message || 'Kişi silinemedi.');
+      }
     }
   };
 
   // Ledger triggers
   const handleLedgerClick = (contact) => {
-    // Reload contact to get updated totals
     const service = activeTab === 'customers' ? customerService : supplierService;
     const refreshed = service.getById(contact.id);
     setSelectedContact(refreshed);
@@ -175,59 +178,61 @@ export default function CustomerSupplierManager({ activePage, globalSearchQuery 
     setShowTransModal(true);
   };
 
-  // Save Transaction
-  const handleSaveTransaction = (e) => {
+  // Save Transaction (Requirement 14: validate non-negative, debt check, runTransaction via transactionService)
+  const handleSaveTransaction = async (e) => {
     e.preventDefault();
     setFormError('');
 
-    if (!transForm.amount || Number(transForm.amount) <= 0) {
+    const amountNum = Number(transForm.amount);
+    if (!Number.isFinite(amountNum) || amountNum <= 0) {
       setFormError('Lütfen sıfırdan büyük geçerli bir tutar girin.');
       return;
     }
 
     try {
       const transactionService = getTransactionService();
-      transactionService.save({
+      await transactionService.save({
         contactId: selectedContact.id,
         contactType: activeTab === 'customers' ? 'customer' : 'supplier',
         type: transType, // tahsilat | odeme
-        amount: Number(transForm.amount),
+        amount: amountNum,
         date: transForm.date,
         dueDate: transForm.dueDate || null,
         description: transForm.description
       });
 
-      // Reload
       setShowTransModal(false);
       
-      // Update local state
       const service = activeTab === 'customers' ? customerService : supplierService;
       const refreshed = service.getById(selectedContact.id);
       setSelectedContact(refreshed);
       loadLedger(refreshed);
       loadData();
     } catch (err) {
-      setFormError('Hareket kaydedilemedi.');
+      setFormError(err.message || 'Hareket kaydedilemedi.');
     }
   };
 
   // Delete Transaction
-  const handleDeleteTransaction = (trId) => {
+  const handleDeleteTransaction = async (trId) => {
     if (confirm('Bu ödeme/tahsilat hareketini silmek istediğinize emin misiniz?')) {
-      const transactionService = getTransactionService();
-      transactionService.delete(trId);
-      
-      // Reload
-      const service = activeTab === 'customers' ? customerService : supplierService;
-      const refreshed = service.getById(selectedContact.id);
-      setSelectedContact(refreshed);
-      loadLedger(refreshed);
-      loadData();
+      try {
+        const transactionService = getTransactionService();
+        await transactionService.delete(trId);
+        
+        const service = activeTab === 'customers' ? customerService : supplierService;
+        const refreshed = service.getById(selectedContact.id);
+        setSelectedContact(refreshed);
+        loadLedger(refreshed);
+        loadData();
+      } catch (err) {
+        alert(err.message || 'İşlem hareketi silinemedi.');
+      }
     }
   };
 
   // Add CRM Note
-  const handleAddCrmNote = () => {
+  const handleAddCrmNote = async () => {
     if (!newCrmNote.trim()) return;
     const service = activeTab === 'customers' ? customerService : supplierService;
     const updatedNotes = [...(selectedContact.crmNotes || []), {
@@ -236,19 +241,19 @@ export default function CustomerSupplierManager({ activePage, globalSearchQuery 
       text: newCrmNote.trim()
     }];
     const updatedContact = { ...selectedContact, crmNotes: updatedNotes };
-    service.save(updatedContact);
+    await service.save(updatedContact);
     setSelectedContact(updatedContact);
     setNewCrmNote('');
     loadData();
   };
 
   // Delete CRM Note
-  const handleDeleteCrmNote = (noteId) => {
+  const handleDeleteCrmNote = async (noteId) => {
     if (confirm('Bu notu silmek istediğinize emin misiniz?')) {
       const service = activeTab === 'customers' ? customerService : supplierService;
       const updatedNotes = (selectedContact.crmNotes || []).filter(n => n.id !== noteId);
       const updatedContact = { ...selectedContact, crmNotes: updatedNotes };
-      service.save(updatedContact);
+      await service.save(updatedContact);
       setSelectedContact(updatedContact);
       loadData();
     }

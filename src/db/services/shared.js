@@ -38,27 +38,34 @@ export const generateUUID = () => {
   return 'id-' + Math.random().toString(36).substring(2, 11) + '-' + Date.now().toString(36);
 };
 
-// Helper: Parse number with 2 decimal precision
+// Requirement 17: Strict safeNumber rejecting NaN, Infinity, -Infinity and negative values unless explicitly allowed
 export const parseNumber = (val) => {
   if (val === null || val === undefined || val === '') return 0;
   const num = Number(val);
-  if (isNaN(num)) return 0;
+  if (!Number.isFinite(num)) {
+    throw new Error(`Geçersiz sayısal değer: ${val}`);
+  }
   return Math.round((num + Number.EPSILON) * 100) / 100;
 };
 
-// Helper: Validate non-negative numbers explicitly
 export const validateNonNegative = (val, fieldName = 'Tutar') => {
   const num = parseNumber(val);
   if (num < 0) {
-    throw new Error(`${fieldName} negatif olamaz.`);
+    throw new Error(`${fieldName} negatif olamaz: ${val}`);
   }
   return num;
 };
 
-// Legacy safeNumber wrapper
 export const safeNumber = (val, allowNegative = false) => {
-  if (allowNegative) return parseNumber(val);
-  return validateNonNegative(val < 0 ? 0 : val);
+  if (val === null || val === undefined || val === '') return 0;
+  const num = Number(val);
+  if (!Number.isFinite(num)) {
+    throw new Error(`Geçersiz sayısal değer: ${val}`);
+  }
+  if (!allowNegative && num < 0) {
+    throw new Error(`Sayısal değer negatif olamaz: ${val}`);
+  }
+  return Math.round((num + Number.EPSILON) * 100) / 100;
 };
 
 export const round2 = (val) => parseNumber(val);
@@ -89,9 +96,15 @@ export const removeFromPendingSync = (key) => {
   localStorage.setItem(STORAGE_KEYS.PENDING_SYNC, JSON.stringify(updated));
 };
 
-// Helper: Sync data to Supabase with offline queue and retry
+// Flag to pause intermediate cloud syncs during transaction runner execution (Requirement 10)
+let isSyncPaused = false;
+export const setSyncPaused = (paused) => {
+  isSyncPaused = paused;
+};
+
+// Requirement 8: Sync data to Supabase with onConflict: 'owner_id,key'
 export const syncToCloud = async (key, data) => {
-  if (!isSupabaseConfigured) return false;
+  if (!isSupabaseConfigured || isSyncPaused) return false;
   try {
     const { data: authData } = await supabase.auth.getUser();
     const owner_id = authData?.user?.id;
@@ -104,6 +117,8 @@ export const syncToCloud = async (key, data) => {
         value: data, 
         updated_at: new Date().toISOString(), 
         owner_id 
+      }, {
+        onConflict: 'owner_id,key'
       });
     
     if (error) {
@@ -131,26 +146,24 @@ export const flushPendingSync = async () => {
     const localData = getJson(key, null);
     if (localData !== null) {
       const success = await syncToCloud(key, localData);
-      if (!success) break; // Network still unavailable
+      if (!success) break;
     }
   }
 };
 
-// Safe Merge of Local and Remote collection data (Latest updatedAt wins)
+// Requirement 9: Safe Merge with Tombstone Support (deletedAt)
 export const mergeCollections = (localItems = [], remoteItems = []) => {
   if (!Array.isArray(localItems)) localItems = [];
   if (!Array.isArray(remoteItems)) remoteItems = [];
 
   const itemMap = new Map();
 
-  // Load local items first
   localItems.forEach(item => {
     if (item && item.id) {
       itemMap.set(item.id, item);
     }
   });
 
-  // Merge remote items based on updatedAt timestamp
   remoteItems.forEach(remoteItem => {
     if (!remoteItem || !remoteItem.id) return;
     
@@ -166,7 +179,9 @@ export const mergeCollections = (localItems = [], remoteItems = []) => {
     }
   });
 
-  return Array.from(itemMap.values());
+  // Filter out items soft-deleted via tombstone deletedAt
+  const mergedList = Array.from(itemMap.values()).filter(item => !item.deletedAt);
+  return mergedList;
 };
 
 export const logAction = async (action, entityType, entityId, oldValue, newValue) => {
@@ -228,20 +243,21 @@ export const logAction = async (action, entityType, entityId, oldValue, newValue
   }
 };
 
-// Helper: Save item to LocalStorage with timestamp and trigger sync to cloud
+// Requirement 9: saveJson assigns a FRESH updatedAt to modified/new records
 export const saveJson = async (key, data) => {
   const oldValue = getJson(key, null);
 
-  // Attach updatedAt to records if array
   let preparedData = data;
   const nowStr = new Date().toISOString();
 
   if (Array.isArray(data) && key !== STORAGE_KEYS.AUDIT_LOG) {
     preparedData = data.map(item => {
       if (typeof item === 'object' && item !== null) {
+        const oldItem = Array.isArray(oldValue) ? oldValue.find(o => o && o.id === item.id) : null;
+        const isModified = !oldItem || JSON.stringify(oldItem) !== JSON.stringify(item);
         return {
           ...item,
-          updatedAt: item.updatedAt || nowStr
+          updatedAt: isModified ? nowStr : (item.updatedAt || nowStr)
         };
       }
       return item;
@@ -270,16 +286,48 @@ export const saveJson = async (key, data) => {
   return true;
 };
 
-// Helper: Secure SHA-256 Password Hasher using native browser SubtleCrypto
-export const hashPassword = async (password) => {
-  const msgUint8 = new TextEncoder().encode(password);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', msgUint8);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-  return hashHex;
+// Requirement 1: Web Crypto PBKDF2 with random salt and 100,000 iterations
+const bytesToHex = (bytes) => Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+const hexToBytes = (hex) => {
+  const bytes = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < bytes.length; i++) {
+    bytes[i] = parseInt(hex.substr(i * 2, 2), 16);
+  }
+  return bytes;
 };
 
-// Helper: Calculate phone costs, profits and aging
+export const pbkdf2Hash = async (password, saltHex = null) => {
+  const enc = new TextEncoder();
+  let salt;
+  if (saltHex) {
+    salt = hexToBytes(saltHex);
+  } else {
+    salt = crypto.getRandomValues(new Uint8Array(16));
+  }
+  const keyMaterial = await crypto.subtle.importKey(
+    'raw',
+    enc.encode(password),
+    { name: 'PBKDF2' },
+    false,
+    ['deriveBits', 'deriveKey']
+  );
+  const derivedBits = await crypto.subtle.deriveBits(
+    { name: 'PBKDF2', salt, iterations: 100000, hash: 'SHA-256' },
+    keyMaterial,
+    256
+  );
+  const hashHexStr = bytesToHex(new Uint8Array(derivedBits));
+  const saltHexStr = bytesToHex(salt);
+  return { hashHex: hashHexStr, saltHex: saltHexStr, combined: `${saltHexStr}:${hashHexStr}` };
+};
+
+export const verifyPbkdf2 = async (password, combinedStr) => {
+  if (!combinedStr || typeof combinedStr !== 'string' || !combinedStr.includes(':')) return false;
+  const [saltHex, expectedHash] = combinedStr.split(':');
+  const { hashHex } = await pbkdf2Hash(password, saltHex);
+  return hashHex === expectedHash;
+};
+
 export const calculatePhoneCosts = (phone) => {
   const purchasePrice = parseNumber(phone.purchasePrice);
   const totalExpenses = (phone.expenses || []).reduce((sum, exp) => sum + parseNumber(exp.amount), 0);
@@ -323,15 +371,7 @@ export const ensureStorageKeys = () => {
   });
 };
 
-// Initialize DB and seed demo data if empty
 export const initDb = async (force = false) => {
-  const existingUserStr = localStorage.getItem('tys_admin_user');
-  if (existingUserStr && import.meta.env.DEV) {
-    // Keep existing user in dev
-  } else if (!existingUserStr) {
-    // Local user setup initialized on demand
-  }
-
   ensureStorageKeys();
 
   if (!force && localStorage.getItem(STORAGE_KEYS.PHONES) && localStorage.getItem(STORAGE_KEYS.SETTINGS)) {

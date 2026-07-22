@@ -1,5 +1,5 @@
 import { supabase, isSupabaseConfigured } from '../supabaseClient';
-import { STORAGE_KEYS, getJson, saveJson, hashPassword } from './shared';
+import { STORAGE_KEYS, getJson, saveJson, pbkdf2Hash, verifyPbkdf2 } from './shared';
 
 const LOCK_KEY = 'tys_auth_lock';
 const MAX_ATTEMPTS = 5;
@@ -32,6 +32,27 @@ const clearFailedAttempts = () => {
 };
 
 export const authService = {
+  isLocalAdminConfigured: () => {
+    const userStr = localStorage.getItem('tys_admin_user');
+    return Boolean(userStr);
+  },
+
+  setupInitialLocalAdmin: async (username, password) => {
+    const cleanUsername = (username || '').trim();
+    if (!cleanUsername || !password || password.length < 6) {
+      throw new Error('Yönetici kullanıcı adı ve en az 6 karakterli şifre girmek zorunludur.');
+    }
+    const { combined } = await pbkdf2Hash(password);
+    const user = {
+      username: cleanUsername,
+      passwordHash: combined,
+      role: 'admin',
+      createdAt: new Date().toISOString()
+    };
+    localStorage.setItem('tys_admin_user', JSON.stringify(user));
+    return user;
+  },
+
   login: async (usernameOrEmail, password, rememberMe) => {
     checkLockout();
 
@@ -63,30 +84,21 @@ export const authService = {
           userId: data.user.id
         };
         saveJson(STORAGE_KEYS.AUTH, session);
-        return { success: true, mustChangePassword: false };
+        return { success: true };
       } catch (err) {
         console.error("Supabase Auth hatası:", err);
         throw err;
       }
     } else {
-      // Offline local authentication check using stored password hash
+      // Offline local authentication
       const userStr = localStorage.getItem('tys_admin_user');
-      let user = userStr ? JSON.parse(userStr) : null;
-
-      // Default initial local account setup if none exists
-      if (!user) {
-        const defaultHash = await hashPassword('admin123');
-        user = {
-          username: 'admin',
-          passwordHash: defaultHash,
-          role: 'admin',
-          mustChangePassword: true
-        };
-        localStorage.setItem('tys_admin_user', JSON.stringify(user));
+      if (!userStr) {
+        throw new Error('Yönetici hesabı henüz tanımlanmamış. Lütfen ilk kurulumu yapın.');
       }
 
-      const inputHash = await hashPassword(password);
-      const isMatch = (cleanUsername.toLowerCase() === user.username.toLowerCase() || cleanUsername.toLowerCase() === 'admin') && inputHash === user.passwordHash;
+      const user = JSON.parse(userStr);
+      const isMatch = (cleanUsername.toLowerCase() === user.username.toLowerCase()) && 
+        await verifyPbkdf2(password, user.passwordHash);
 
       if (!isMatch) {
         recordFailedAttempt();
@@ -104,7 +116,7 @@ export const authService = {
         userId: 'local-admin-id'
       };
       saveJson(STORAGE_KEYS.AUTH, session);
-      return { success: true, mustChangePassword: !!user.mustChangePassword };
+      return { success: true };
     }
   },
 
@@ -134,9 +146,10 @@ export const authService = {
 
   changeLocalPassword: async (newPassword) => {
     const userStr = localStorage.getItem('tys_admin_user');
-    let user = userStr ? JSON.parse(userStr) : { username: 'admin', role: 'admin' };
-    user.passwordHash = await hashPassword(newPassword);
-    user.mustChangePassword = false;
+    if (!userStr) throw new Error('Yönetici hesabı bulunamadı.');
+    let user = JSON.parse(userStr);
+    const { combined } = await pbkdf2Hash(newPassword);
+    user.passwordHash = combined;
     localStorage.setItem('tys_admin_user', JSON.stringify(user));
     return true;
   },
@@ -149,7 +162,6 @@ export const authService = {
         console.error("Supabase çıkış hatası:", err);
       }
     }
-    // DO NOT use localStorage.clear()! Only clear auth session data.
     localStorage.removeItem(STORAGE_KEYS.AUTH);
     localStorage.removeItem(LOCK_KEY);
   },

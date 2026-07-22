@@ -1,32 +1,17 @@
-import { STORAGE_KEYS, getJson, saveJson, generateUUID, parseNumber, validateNonNegative, round2, calculatePhoneCosts } from './shared';
-import { supplierService } from './supplierService';
+import { STORAGE_KEYS, getJson, saveJson, generateUUID, parseNumber, validateNonNegative, round2 } from './shared';
 import { customerService } from './customerService';
+import { supplierService } from './supplierService';
 import { transactionService } from './transactionService';
-import { installmentService, mapPaymentMethod } from './installmentService';
 import { cashMovementService } from './cashMovementService';
+import { installmentService, mapPaymentMethod } from './installmentService';
 import { runTransaction } from './transactionRunner';
-
-export const PHONE_STATUSES = [
-  'Stokta',
-  'Rezerve',
-  'Satıldı',
-  'Takasta Alındı',
-  'Serviste',
-  'İade',
-  'Hurda'
-];
 
 export const phoneService = {
   getAll: () => {
-    const phones = getJson(STORAGE_KEYS.PHONES, []);
-    return phones.map(phone => ({
-      ...phone,
-      ...calculatePhoneCosts(phone)
-    }));
+    return getJson(STORAGE_KEYS.PHONES, []);
   },
 
   getById: (id) => {
-    if (!id) return null;
     const phones = phoneService.getAll();
     return phones.find(p => p.id === id) || null;
   },
@@ -34,30 +19,22 @@ export const phoneService = {
   save: async (phoneData) => {
     return await runTransaction(async () => {
       const phones = getJson(STORAGE_KEYS.PHONES, []);
-      const isNew = phoneData.id ? !phones.some(p => p.id === phoneData.id) : true;
+      const isNew = !phoneData.id;
+      const phoneId = phoneData.id || generateUUID();
 
-      // Check duplicate IMEI
-      const duplicateImei = phones.find(p => p.id !== phoneData.id && (
-        (phoneData.imei1 && (p.imei1 === phoneData.imei1 || p.imei2 === phoneData.imei1)) ||
-        (phoneData.imei2 && (p.imei1 === phoneData.imei2 || p.imei2 === phoneData.imei2))
-      ));
-      
-      if (duplicateImei) {
-        throw new Error(`Bu IMEI numarası zaten kayıtlı: ${duplicateImei.brand} ${duplicateImei.model} (S/N: ${duplicateImei.serialNumber || 'Bilinmiyor'})`);
-      }
+      const purchasePrice = validateNonNegative(phoneData.purchasePrice, 'Alış Fiyatı');
 
-      // Requirement 4: Seller Phone Mapping (boughtFromPhone vs purchaseContactPhone)
-      const sellerPhone = phoneData.boughtFromPhone || phoneData.purchaseContactPhone || '';
+      // Dual support for seller contact info
       let boughtFromId = phoneData.boughtFromId || '';
-      let boughtFromName = phoneData.boughtFromName || '';
+      let boughtFromName = phoneData.boughtFromName || phoneData.boughtFromPhone || phoneData.purchaseContactPhone || '';
       let boughtFromType = phoneData.boughtFromType || 'supplier';
 
-      if (!boughtFromId && (boughtFromName || sellerPhone)) {
+      if (!boughtFromId && (boughtFromName || phoneData.purchaseContactPhone)) {
         const supp = await supplierService.findOrCreate({
           name: boughtFromName || 'Tedarikçi',
           fullName: boughtFromName || 'Tedarikçi',
-          phone: sellerPhone,
-          address: phoneData.boughtFromAddress
+          phone: phoneData.purchaseContactPhone || phoneData.boughtFromPhone,
+          company: phoneData.boughtFromCompany
         });
         if (supp) {
           boughtFromId = supp.id;
@@ -66,38 +43,35 @@ export const phoneService = {
         }
       }
 
-      const purchasePrice = validateNonNegative(phoneData.purchasePrice, 'Alış Fiyatı');
-      const salesPrice = phoneData.salesPrice !== undefined ? validateNonNegative(phoneData.salesPrice, 'Satış Fiyatı') : 0;
-      const phoneId = phoneData.id || generateUUID();
-
       const preparedPhone = {
         ...phoneData,
         id: phoneId,
+        brand: phoneData.brand || 'Diğer',
+        model: phoneData.model || 'Bilinmeyen Model',
+        status: phoneData.status || 'Stokta',
+        purchasePrice,
         boughtFromId,
         boughtFromName,
-        boughtFromPhone: sellerPhone,
-        purchaseContactPhone: sellerPhone,
         boughtFromType,
-        purchasePrice,
-        salesPrice,
+        boughtFromPhone: phoneData.boughtFromPhone || phoneData.purchaseContactPhone || '',
+        purchaseContactPhone: phoneData.purchaseContactPhone || phoneData.boughtFromPhone || '',
+        salesPrice: phoneData.salesPrice ? parseNumber(phoneData.salesPrice) : null,
         expenses: phoneData.expenses || [],
-        photos: phoneData.photos || [],
-        status: phoneData.status || 'Stokta',
-        stockSource: phoneData.stockSource || 'purchase',
+        purchaseDate: phoneData.purchaseDate || new Date().toISOString().split('T')[0],
         createdAt: phoneData.createdAt || new Date().toISOString(),
         updatedAt: new Date().toISOString()
       };
 
       let updatedPhones;
-      if (!isNew) {
-        updatedPhones = phones.map(p => p.id === phoneData.id ? preparedPhone : p);
+      if (isNew) {
+        updatedPhones = [preparedPhone, ...phones];
       } else {
-        updatedPhones = [...phones, preparedPhone];
+        updatedPhones = phones.map(p => p.id === phoneId ? preparedPhone : p);
       }
-      
+
       await saveJson(STORAGE_KEYS.PHONES, updatedPhones);
 
-      // Requirement 6 & 7: Purchase Accounting & Payment Types
+      // Purchase Accounting & Payment Types
       if (isNew && purchasePrice > 0) {
         const opId = generateUUID();
         const purchasePaymentType = phoneData.purchasePaymentType || 'Nakit';
@@ -162,6 +136,71 @@ export const phoneService = {
               });
             }
           }
+
+          // Requirement 12: Support supplier installment plan for purchase
+          if (instAmt > 0 && boughtFromId) {
+            const count = Math.max(1, parseInt(phoneData.installmentCount || 1, 10));
+            await installmentService.createPlan({
+              contactId: boughtFromId,
+              contactType: 'supplier',
+              sourceType: 'phone_purchase',
+              sourceId: phoneId,
+              operationId: `${opId}-supplier-plan`,
+              totalAmount: instAmt,
+              downPayment: 0,
+              installmentCount: count,
+              startDate: phoneData.firstPaymentDate || phoneData.purchaseDate || new Date().toISOString().split('T')[0],
+              note: `${phoneData.brand} ${phoneData.model} Alış Taksit Planı`,
+              recordDownPaymentTransaction: false
+            });
+          }
+        } else if (purchasePaymentType === 'Taksit') {
+          // Requirement 12: Direct Taksit purchase option
+          if (boughtFromId) {
+            const count = Math.max(1, parseInt(phoneData.installmentCount || 1, 10));
+            const upfront = validateNonNegative(phoneData.paidAmount || 0, 'Peşin Ödenen');
+            if (upfront > 0) {
+              await transactionService.save({
+                contactId: boughtFromId,
+                contactType: boughtFromType,
+                type: 'payment',
+                amount: upfront,
+                date: phoneData.purchaseDate || new Date().toISOString().split('T')[0],
+                sourceType: 'phone_purchase_payment',
+                sourceId: phoneId,
+                operationId: `${opId}-pay-upfront`,
+                description: `Telefon Alış Peşinat Ödemesi - ${phoneData.brand} ${phoneData.model}`
+              });
+
+              await cashMovementService.save({
+                operationId: `${opId}-cash-upfront`,
+                direction: 'out',
+                paymentMethod: 'cash',
+                amount: upfront,
+                sourceType: 'phone_purchase',
+                sourceId: phoneId,
+                description: `Telefon Alış Peşinatı - ${phoneData.brand} ${phoneData.model}`,
+                date: phoneData.purchaseDate || new Date().toISOString().split('T')[0]
+              });
+            }
+
+            const remTaksit = round2(purchasePrice - upfront);
+            if (remTaksit > 0) {
+              await installmentService.createPlan({
+                contactId: boughtFromId,
+                contactType: 'supplier',
+                sourceType: 'phone_purchase',
+                sourceId: phoneId,
+                operationId: `${opId}-supplier-plan`,
+                totalAmount: remTaksit,
+                downPayment: 0,
+                installmentCount: count,
+                startDate: phoneData.firstPaymentDate || phoneData.purchaseDate || new Date().toISOString().split('T')[0],
+                note: `${phoneData.brand} ${phoneData.model} Alış Taksit Planı`,
+                recordDownPaymentTransaction: false
+              });
+            }
+          }
         } else if (purchasePaymentType === 'Nakit' || purchasePaymentType === 'Havale/EFT' || purchasePaymentType === 'Kart' || purchasePaymentType === 'Havale') {
           if (boughtFromId) {
             await transactionService.save({
@@ -198,23 +237,22 @@ export const phoneService = {
     return await runTransaction(async () => {
       const repairs = getJson(STORAGE_KEYS.REPAIRS, []);
       const tradeIns = getJson(STORAGE_KEYS.TRADE_INS, []);
-      const installments = getJson(STORAGE_KEYS.INSTALLMENTS, []);
 
-      const hasRepairLink = repairs.some(r => r.phoneId === id);
-      const hasTradeLink = tradeIns.some(t => t.soldPhoneId === id || t.receivedPhoneId === id);
-      const hasInstallmentLink = installments.some(i => i.sourceId === id);
+      const hasLinkedRepairs = repairs.some(r => r.phoneId === id);
+      const hasLinkedTradeIns = tradeIns.some(t => t.soldPhoneId === id || t.receivedPhoneId === id);
 
-      if (hasRepairLink || hasTradeLink || hasInstallmentLink) {
-        throw new Error("Bu telefona bağlı aktif tamir, takas veya taksit kaydı bulunduğu için telefon silinemez.");
+      if (hasLinkedRepairs || hasLinkedTradeIns) {
+        throw new Error("Bu telefona bağlı tamir veya takas kaydı bulunduğu için silinemez.");
       }
 
       const phones = getJson(STORAGE_KEYS.PHONES, []);
-      const filtered = phones.filter(p => p.id !== id);
-      await saveJson(STORAGE_KEYS.PHONES, filtered);
+      const updated = phones.filter(p => p.id !== id);
+      await saveJson(STORAGE_KEYS.PHONES, updated);
       return true;
     });
   },
 
+  // Requirement 11: Sell phone with/without customer
   sell: async (id, salesData) => {
     return await runTransaction(async () => {
       const phones = getJson(STORAGE_KEYS.PHONES, []);
@@ -223,7 +261,6 @@ export const phoneService = {
 
       const salesPrice = validateNonNegative(salesData.salesPrice, 'Satış Fiyatı');
 
-      // Requirement 3: Auto resolve Customer with dual name support
       let soldToId = salesData.soldToId || '';
       let soldToName = salesData.soldToName || '';
 
@@ -269,11 +306,26 @@ export const phoneService = {
 
       await saveJson(STORAGE_KEYS.PHONES, updatedPhones);
 
-      // Requirement 5, 7, 8: Accounting, Mixed Payments & Cash Movements
-      if (soldToId && salesPrice > 0) {
-        const operationId = generateUUID();
+      const operationId = generateUUID();
 
-        // 1. Create sale debt on ledger
+      // Requirement 11: Customer-less cash sale generates real cash movement and records sale on phone!
+      if (salesPrice > 0) {
+        if (paymentType === 'Nakit' || paymentType === 'Havale/EFT' || paymentType === 'Kart' || paymentType === 'Havale') {
+          await cashMovementService.save({
+            operationId: `${operationId}-cash-sale`,
+            direction: 'in',
+            paymentMethod: mapPaymentMethod(paymentType),
+            amount: salesPrice,
+            sourceType: 'phone_sale',
+            sourceId: id,
+            description: `Telefon Peşin Satış Tahsilatı - ${phone.brand} ${phone.model}${soldToName ? ` (${soldToName})` : ''}`,
+            date: salesDate
+          });
+        }
+      }
+
+      // Record customer ledger debt & collections if customer selected
+      if (soldToId && salesPrice > 0) {
         await transactionService.save({
           contactId: soldToId,
           contactType: 'customer',
@@ -350,7 +402,6 @@ export const phoneService = {
             });
           }
         } else if (paymentType === 'Nakit' || paymentType === 'Havale/EFT' || paymentType === 'Kart' || paymentType === 'Havale') {
-          // Upfront sale
           await transactionService.save({
             contactId: soldToId,
             contactType: 'customer',
@@ -359,21 +410,11 @@ export const phoneService = {
             date: salesDate,
             sourceType: 'phone_sale_collection',
             sourceId: id,
-            operationId: `${operationId}-collect`,
-            description: `Telefon Satış Tahsilatı (${paymentType})`
+            operationId: `${operationId}-col`,
+            description: `Telefon Satış Tahsilatı (${paymentType}) - ${phone.brand} ${phone.model}`
           });
-
-          await cashMovementService.save({
-            operationId: `${operationId}-cash`,
-            direction: 'in',
-            paymentMethod: mapPaymentMethod(paymentType),
-            amount: salesPrice,
-            sourceType: 'phone_sale',
-            sourceId: id,
-            description: `Telefon Satış Tahsilatı (${paymentType}) - ${phone.brand} ${phone.model}`,
-            date: salesDate
-          });
-        } else if (isTermed) {
+        } else if (paymentType === 'Taksit') {
+          const remTaksit = round2(salesPrice - downPayment);
           if (downPayment > 0) {
             await transactionService.save({
               contactId: soldToId,
@@ -381,25 +422,25 @@ export const phoneService = {
               type: 'collection',
               amount: downPayment,
               date: salesDate,
-              sourceType: 'phone_sale_downpayment',
+              sourceType: 'phone_sale_collection',
               sourceId: id,
               operationId: `${operationId}-dp`,
-              description: `Satış Peşinat Tahsilatı (${phone.brand} ${phone.model})`
+              description: `Telefon Satış Peşinatı - ${phone.brand} ${phone.model}`
             });
 
             await cashMovementService.save({
-              operationId: `${operationId}-dp-cash`,
+              operationId: `${operationId}-cash-dp`,
               direction: 'in',
-              paymentMethod: mapPaymentMethod(salesData.downPaymentMethod || 'Nakit'),
+              paymentMethod: 'cash',
               amount: downPayment,
-              sourceType: 'phone_sale_downpayment',
+              sourceType: 'phone_sale',
               sourceId: id,
-              description: `Satış Peşinat Tahsilatı - ${phone.brand} ${phone.model}`,
+              description: `Telefon Satış Peşinatı - ${phone.brand} ${phone.model}`,
               date: salesDate
             });
           }
 
-          if (paymentType === 'Taksit') {
+          if (remTaksit > 0) {
             const count = Math.max(1, parseInt(salesData.installmentCount || 1, 10));
             await installmentService.createPlan({
               contactId: soldToId,
@@ -407,12 +448,12 @@ export const phoneService = {
               sourceType: 'phone_sale',
               sourceId: id,
               operationId: `${operationId}-plan`,
-              totalAmount: salesPrice,
-              downPayment: downPayment,
+              totalAmount: remTaksit,
+              downPayment: 0,
               installmentCount: count,
               startDate: salesData.firstInstallmentDate || salesDate,
               note: `${phone.brand} ${phone.model} Satış Taksit Planı`,
-              recordDownPaymentTransaction: false // Avoid double counting
+              recordDownPaymentTransaction: false
             });
           }
         }
@@ -422,62 +463,23 @@ export const phoneService = {
     });
   },
 
-  addExpense: async (phoneId, expenseData) => {
-    return await runTransaction(async () => {
-      const phones = getJson(STORAGE_KEYS.PHONES, []);
-      const amount = validateNonNegative(expenseData.amount, 'Masraf Tutarı');
-      const opId = generateUUID();
-      
-      const updatedPhones = phones.map(p => {
-        if (p.id === phoneId) {
-          const newExpense = {
-            id: generateUUID(),
-            name: expenseData.name,
-            amount,
-            date: expenseData.date || new Date().toISOString().split('T')[0]
-          };
-          return {
-            ...p,
-            expenses: [...(p.expenses || []), newExpense],
-            updatedAt: new Date().toISOString()
-          };
-        }
-        return p;
-      });
-
-      await saveJson(STORAGE_KEYS.PHONES, updatedPhones);
-
-      if (amount > 0) {
-        await cashMovementService.save({
-          operationId: `${opId}-exp-cash`,
-          direction: 'out',
-          paymentMethod: mapPaymentMethod(expenseData.paymentMethod || 'Nakit'),
-          amount: amount,
-          sourceType: 'phone_expense',
-          sourceId: phoneId,
-          description: `Cihaz Masrafı - ${expenseData.name}`,
-          date: expenseData.date || new Date().toISOString().split('T')[0]
-        });
-      }
-
-      return true;
-    });
-  },
-
+  // Requirement 13 & 16: Delete phone expense with linked cash movement cleanup
   deleteExpense: async (phoneId, expenseId) => {
     return await runTransaction(async () => {
       const phones = getJson(STORAGE_KEYS.PHONES, []);
-      const updatedPhones = phones.map(p => {
+      const updated = phones.map(p => {
         if (p.id === phoneId) {
+          const updatedExp = (p.expenses || []).filter(e => e.id !== expenseId);
           return {
             ...p,
-            expenses: (p.expenses || []).filter(e => e.id !== expenseId),
+            expenses: updatedExp,
             updatedAt: new Date().toISOString()
           };
         }
         return p;
       });
-      await saveJson(STORAGE_KEYS.PHONES, updatedPhones);
+      await saveJson(STORAGE_KEYS.PHONES, updated);
+      await cashMovementService.deleteByOperationId(`phone-exp-${expenseId}`);
       return true;
     });
   }

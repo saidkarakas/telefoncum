@@ -66,10 +66,10 @@ export default function Layout({
     } else {
       document.documentElement.classList.remove('dark');
     }
-    // Save to settings
+    // Save to settings asynchronously
     const activeSettings = settingsService.get();
     if (activeSettings.theme !== theme) {
-      settingsService.save({ ...activeSettings, theme });
+      settingsService.save({ ...activeSettings, theme }).catch(err => console.error("Theme save error", err));
     }
   }, [theme]);
 

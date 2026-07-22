@@ -1,13 +1,15 @@
-import { STORAGE_KEYS, getJson, saveJson } from './shared';
+import { STORAGE_KEYS, getJson, saveJson, setSyncPaused, syncToCloud } from './shared';
 
 /**
- * Memory-First Transaction Runner for Multi-Step Operations
- * 1. Takes snapshot of specified LocalStorage keys.
- * 2. Executes operation callback.
- * 3. Checks for duplicate operationId.
- * 4. Commits changes to LocalStorage on success.
- * 5. Restores snapshot if local commit fails.
- * 6. Triggers background cloud sync via saveJson without deleting local data on network failure.
+ * Yerel Rollback ve Çevrimdışı Yeniden Deneme Kuyruğu Kullanan İşlem Koşucusu (Local Transaction Runner)
+ * Note: Gerçek Supabase çoklu tablo atomikliği olmadığından yerel bellekte bellek snapshot'ı,
+ * rollback ve çevrimdışı yeniden deneme kuyruğu yönetimi uygulanır.
+ * 
+ * 1. Belirtilen tüm LocalStorage anahtarlarının snapshot'ını alır.
+ * 2. Ara bulut senkronizasyonlarını duraklatır (isSyncPaused = true).
+ * 3. İşlem callback fonksiyonunu çalıştırır.
+ * 4. Hata oluşursa tüm yerel verileri snapshot durumuna geri yükler (rollback).
+ * 5. Başarılı olursa ara senkronizasyonu kaldırıp (isSyncPaused = false) güncellenen koleksiyonları buluta gönderir.
  */
 export const runTransaction = async (optionsOrAction) => {
   let operationId = null;
@@ -41,7 +43,7 @@ export const runTransaction = async (optionsOrAction) => {
     }
   }
 
-  // Step 1: Snapshot
+  // Requirement 10: Include REPAIRS, STOCK_MOVEMENTS, EXPENSES, SETTINGS in snapshot
   const snapshots = {};
   const targetKeys = [...new Set([
     ...keysToLock, 
@@ -52,28 +54,44 @@ export const runTransaction = async (optionsOrAction) => {
     STORAGE_KEYS.INSTALLMENTS, 
     STORAGE_KEYS.TRADE_INS, 
     STORAGE_KEYS.PARTS, 
-    STORAGE_KEYS.CASH_MOVEMENTS
+    STORAGE_KEYS.CASH_MOVEMENTS,
+    STORAGE_KEYS.REPAIRS,
+    STORAGE_KEYS.STOCK_MOVEMENTS,
+    STORAGE_KEYS.EXPENSES,
+    STORAGE_KEYS.SETTINGS
   ])];
   
   targetKeys.forEach(key => {
     snapshots[key] = localStorage.getItem(key);
   });
 
+  // Pause cloud sync for intermediate calls
+  setSyncPaused(true);
+
   try {
-    // Step 2: Execute Action (In-memory validations & updates)
     const result = await action();
 
-    // Step 3: Local Commits
     if (result && result.toSave) {
       for (const [key, data] of Object.entries(result.toSave)) {
         await saveJson(key, data);
       }
     }
 
+    // Resume cloud sync and flush updated keys to cloud
+    setSyncPaused(false);
+    for (const key of targetKeys) {
+      const currentStr = localStorage.getItem(key);
+      if (currentStr !== snapshots[key]) {
+        const currentData = getJson(key, []);
+        syncToCloud(key, currentData).catch(err => console.error(`Transaction final cloud sync error for ${key}:`, err));
+      }
+    }
+
     return (result && result.data !== undefined) ? result.data : result;
   } catch (error) {
-    // Step 4: Rollback Local Storage
-    console.error("İşlem hatası, yerel veriler geri yükleniyor:", error);
+    // Rollback Local Storage
+    setSyncPaused(false);
+    console.error("İşlem hatası, yerel veriler snapshot durumuna geri yükleniyor:", error);
     for (const [key, snapshotStr] of Object.entries(snapshots)) {
       try {
         if (snapshotStr !== null) {

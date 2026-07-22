@@ -1,4 +1,4 @@
-import { STORAGE_KEYS, getJson, saveJson, generateUUID, parseNumber, validateNonNegative, round2 } from './shared';
+import { STORAGE_KEYS, getJson, saveJson, generateUUID, validateNonNegative, round2 } from './shared';
 import { customerService } from './customerService';
 import { transactionService } from './transactionService';
 import { installmentService, mapPaymentMethod } from './installmentService';
@@ -283,9 +283,41 @@ export const tradeInService = {
     });
   },
 
+  // Requirement 16: Safe deletion for trade-in record with stock & cash cleanup
   deleteTradeIn: async (id) => {
     return await runTransaction(async () => {
       const tradeIns = tradeInService.getAll();
+      const trade = tradeIns.find(t => t.id === id);
+      if (!trade) return true;
+
+      const phones = getJson(STORAGE_KEYS.PHONES, []);
+      const receivedPhone = phones.find(p => p.id === trade.receivedPhoneId);
+      if (receivedPhone && receivedPhone.status === 'Satıldı') {
+        throw new Error("Takasla alınan cihaz daha sonra satıldığı için bu takas kaydı silinemez.");
+      }
+
+      // Revert sold phone status back to 'Stokta'
+      const updatedPhones = phones.filter(p => p.id !== trade.receivedPhoneId).map(p => {
+        if (p.id === trade.soldPhoneId) {
+          return {
+            ...p,
+            status: 'Stokta',
+            soldToId: null,
+            soldToName: null,
+            salesDate: null,
+            salesPrice: null,
+            tradeInId: null,
+            updatedAt: new Date().toISOString()
+          };
+        }
+        return p;
+      });
+
+      await saveJson(STORAGE_KEYS.PHONES, updatedPhones);
+      if (trade.operationId) {
+        await cashMovementService.deleteByOperationId(`${trade.operationId}-diff-cash`);
+      }
+
       const updated = tradeIns.filter(t => t.id !== id);
       await saveJson(STORAGE_KEYS.TRADE_INS, updated);
       return true;

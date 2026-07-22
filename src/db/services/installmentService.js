@@ -1,4 +1,4 @@
-import { STORAGE_KEYS, getJson, saveJson, generateUUID, parseNumber, validateNonNegative, round2 } from './shared';
+import { STORAGE_KEYS, getJson, saveJson, generateUUID, validateNonNegative, round2 } from './shared';
 import { transactionService } from './transactionService';
 import { cashMovementService } from './cashMovementService';
 import { runTransaction } from './transactionRunner';
@@ -11,15 +11,25 @@ export const mapPaymentMethod = (typeStr) => {
   return 'cash';
 };
 
+// Requirement 15: Month addition helper with end-of-month clamping for 29, 30, 31st
+export const addMonthsClamped = (startDateStr, monthsToAdd) => {
+  const [year, month, day] = startDateStr.split('-').map(Number);
+  const targetDate = new Date(year, month - 1 + monthsToAdd, 1);
+  const maxDaysInTargetMonth = new Date(targetDate.getFullYear(), targetDate.getMonth() + 1, 0).getDate();
+  const clampedDay = Math.min(day, maxDaysInTargetMonth);
+  const finalDate = new Date(targetDate.getFullYear(), targetDate.getMonth(), clampedDay);
+  return finalDate.toISOString().split('T')[0];
+};
+
 export const installmentService = {
   getAll: () => {
     const installments = getJson(STORAGE_KEYS.INSTALLMENTS, []);
     const today = new Date().toISOString().split('T')[0];
 
-    // Recalculate overdue statuses dynamically
+    // Requirement 15: Recalculate overdue statuses dynamically (partially paid overdue remain Gecikmiş)
     return installments.map(plan => {
       const updatedSchedule = (plan.schedule || []).map(item => {
-        if (item.status === 'Bekliyor' && item.dueDate < today && item.remainingAmount > 0) {
+        if ((item.status === 'Bekliyor' || item.status === 'Kısmi Ödendi') && item.dueDate < today && item.remainingAmount > 0) {
           return { ...item, status: 'Gecikmiş' };
         }
         return item;
@@ -62,12 +72,11 @@ export const installmentService = {
     const roundingDiff = round2(remainingAmount - (baseAmount * count));
 
     const startDate = planData.startDate || new Date().toISOString().split('T')[0];
-    const startDtObj = new Date(startDate);
 
+    // Requirement 15: Use end-of-month clamped date generation
     const schedule = [];
     for (let i = 1; i <= count; i++) {
-      const instDueDate = new Date(startDtObj.getFullYear(), startDtObj.getMonth() + (i - 1), startDtObj.getDate());
-      const dueDateStr = instDueDate.toISOString().split('T')[0];
+      const dueDateStr = addMonthsClamped(startDate, i - 1);
       const instAmount = i === count ? round2(baseAmount + roundingDiff) : baseAmount;
 
       schedule.push({
@@ -96,10 +105,10 @@ export const installmentService = {
       installmentCount: count,
       startDate,
       frequency: 'monthly',
-      dueDay: startDtObj.getDate(),
       status: remainingAmount <= 0 ? 'Tamamlandı' : 'Bekliyor',
       note: planData.note || '',
       schedule,
+      payments: [],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
@@ -107,7 +116,6 @@ export const installmentService = {
     const installments = getJson(STORAGE_KEYS.INSTALLMENTS, []);
     await saveJson(STORAGE_KEYS.INSTALLMENTS, [newPlan, ...installments]);
 
-    // Note: Down payment collection transaction is created ONLY by phoneService or tradeInService to prevent double-counting!
     if (planData.recordDownPaymentTransaction && downPayment > 0 && planData.contactId) {
       await transactionService.save({
         contactId: planData.contactId,
@@ -125,11 +133,20 @@ export const installmentService = {
     return newPlan;
   },
 
+  // Requirement 15: Idempotent Installment Payment (prevents double balance deduction on duplicate calls)
   payInstallment: async (planId, installmentId, paymentAmount, paymentType = 'Nakit', note = '', customOpId = null) => {
     return await runTransaction(async () => {
       const plans = getJson(STORAGE_KEYS.INSTALLMENTS, []);
       const plan = plans.find(p => p.id === planId);
       if (!plan) throw new Error("Taksit planı bulunamadı.");
+
+      const opId = customOpId || generateUUID();
+      const existingPayments = plan.payments || [];
+
+      // Idempotency check: If operationId already recorded in plan payments, return existing plan
+      if (existingPayments.some(p => p.opId === opId)) {
+        return plan;
+      }
 
       const payVal = validateNonNegative(paymentAmount, 'Ödeme Tutarı');
       if (payVal <= 0) throw new Error("Geçerli bir ödeme tutarı giriniz.");
@@ -142,11 +159,16 @@ export const installmentService = {
         throw new Error(`Ödeme tutarı kalan taksit borcundan (${inst.remainingAmount} TL) fazla olamaz.`);
       }
 
-      const opId = customOpId || generateUUID();
-
       const newPaidAmount = round2(inst.paidAmount + payVal);
       const newRemainingAmount = round2(inst.amount - newPaidAmount);
-      const instStatus = newRemainingAmount <= 0 ? 'Ödendi' : 'Kısmi Ödendi';
+      
+      const today = new Date().toISOString().split('T')[0];
+      let instStatus = 'Kısmi Ödendi';
+      if (newRemainingAmount <= 0) {
+        instStatus = 'Ödendi';
+      } else if (inst.dueDate < today) {
+        instStatus = 'Gecikmiş';
+      }
 
       const updatedInst = {
         ...inst,
@@ -162,11 +184,20 @@ export const installmentService = {
       const totalRemaining = newSchedule.reduce((sum, item) => sum + item.remainingAmount, 0);
       const allPaid = newSchedule.every(item => item.status === 'Ödendi');
 
+      const paymentRecord = {
+        opId,
+        installmentId,
+        amount: payVal,
+        paymentType,
+        date: new Date().toISOString()
+      };
+
       const updatedPlan = {
         ...plan,
         remainingAmount: totalRemaining,
         status: allPaid ? 'Tamamlandı' : 'Kısmi Ödendi',
         schedule: newSchedule,
+        payments: [...existingPayments, paymentRecord],
         updatedAt: new Date().toISOString()
       };
 
@@ -203,10 +234,21 @@ export const installmentService = {
     });
   },
 
+  // Requirement 16: Safe deletion check for installment plan
   deletePlan: async (id) => {
-    const plans = getJson(STORAGE_KEYS.INSTALLMENTS, []);
-    const updated = plans.filter(p => p.id !== id);
-    await saveJson(STORAGE_KEYS.INSTALLMENTS, updated);
-    return true;
+    return await runTransaction(async () => {
+      const plans = getJson(STORAGE_KEYS.INSTALLMENTS, []);
+      const plan = plans.find(p => p.id === id);
+      if (!plan) return true;
+
+      const hasPaidInstallments = (plan.schedule || []).some(s => s.paidAmount > 0);
+      if (hasPaidInstallments) {
+        throw new Error("Ödemesi yapılmış taksit planları doğrudan silinemez. Lütfen önce yapılan ödeme hareketlerini iptal edin.");
+      }
+
+      const updated = plans.filter(p => p.id !== id);
+      await saveJson(STORAGE_KEYS.INSTALLMENTS, updated);
+      return true;
+    });
   }
 };

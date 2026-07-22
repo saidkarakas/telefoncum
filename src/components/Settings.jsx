@@ -34,7 +34,7 @@ export default function SettingsPage({ activePage }) {
   }, [activePage]);
 
   // Save Settings
-  const handleSaveSettings = (e) => {
+  const handleSaveSettings = async (e) => {
     e.preventDefault();
     setSuccessMsg('');
     setErrorMsg('');
@@ -45,9 +45,8 @@ export default function SettingsPage({ activePage }) {
     }
 
     try {
-      settingsService.save(settings);
+      await settingsService.save(settings);
       setSuccessMsg('Ayarlar başarıyla kaydedildi.');
-      // Auto dismiss success
       setTimeout(() => setSuccessMsg(''), 3000);
     } catch (err) {
       setErrorMsg('Ayarlar kaydedilemedi.');
@@ -74,59 +73,61 @@ export default function SettingsPage({ activePage }) {
     }
   };
 
-  // Import DB Backup JSON
+  // Import DB Backup JSON (Requirement 6: Async reader.onload + await importDatabase + disable input)
   const handleRestore = (e) => {
     setSuccessMsg('');
     setErrorMsg('');
-    const file = e.target.files[0];
+    const inputEl = e.target;
+    const file = inputEl.files[0];
     if (!file) return;
 
     if (file.size > SECURITY_LIMITS.MAX_BACKUP_SIZE_BYTES) {
       setErrorMsg(`Yedek dosyası boyutu çok büyük (Maksimum ${SECURITY_LIMITS.MAX_BACKUP_SIZE_BYTES / (1024*1024)} MB).`);
-      e.target.value = '';
+      inputEl.value = '';
       return;
     }
 
     const userConfirm = confirm("⚠️ UYARI: Yedek yükleme işlemi mevcut tüm verilerinizi (telefon stokları, tamir kayıtları, kasa hareketleri vb.) tamamen silecektir ve geri alınamaz. Devam etmek istediğinizden emin misiniz?");
     if (!userConfirm) {
-      e.target.value = '';
+      inputEl.value = '';
       return;
     }
 
+    inputEl.disabled = true;
+    setSuccessMsg('Yedek dosyası okunuyor ve buluta senkronize ediliyor...');
+
     const reader = new FileReader();
-    reader.onload = (event) => {
+    reader.onload = async (event) => {
       try {
         const json = event.target.result;
-        settingsService.importDatabase(json);
-        setSuccessMsg('Veriler başarıyla içe aktarıldı. Sayfa yenileniyor...');
+        await settingsService.importDatabase(json);
+        setSuccessMsg('Veriler başarıyla içe aktarıldı ve senkronize edildi. Sayfa yenileniyor...');
         setTimeout(() => {
           window.location.reload();
-        }, 1550);
+        }, 1200);
       } catch (err) {
         setErrorMsg(err.message || 'Yedek dosyası yüklenirken bir hata oluştu.');
-        e.target.value = '';
+      } finally {
+        inputEl.disabled = false;
+        inputEl.value = '';
       }
     };
     reader.readAsText(file);
   };
 
-  // Reset to Demo Data
+  // Requirement 5: Reset database via settingsService.resetDatabase()
   const handleResetData = async () => {
-    if (confirm('DİKKAT: Mevcut tüm telefon, müşteri, cari ve gider verileriniz silinecektir! Demo verilerine geri dönmek istediğinizden emin misiniz?')) {
+    if (confirm('DİKKAT: Mevcut tüm telefon, müşteri, cari, tamir ve gider verileriniz silinecektir! Tüm veritabanını sıfırlamak istediğinizden emin misiniz?')) {
       try {
-        // localStorage.clear() YAPMIYORUZ çünkü Supabase oturum (şifre) token'ını da siliyor.
-        // Şifre silinince de initDb() içindeki syncToCloud() "Kullanıcı giriş yapmamış" deyip buluttaki verileri SIFIRLAMIYOR!
-        localStorage.removeItem('tys_audit_log'); // Logları sil
+        setSuccessMsg('Tüm veri koleksiyonları sıfırlanıyor, lütfen bekleyin...');
+        await settingsService.resetDatabase();
         
-        setSuccessMsg('Veriler sıfırlanıyor, lütfen bekleyin...');
-        await initDb(true); // Tüm tabloları [] olarak ezip buluta yollar ve bitmesini BEKLER!
-        
-        setSuccessMsg('Veriler sıfırlandı. Sayfa yenileniyor...');
+        setSuccessMsg('Tüm veriler sıfırlandı. Sayfa yenileniyor...');
         setTimeout(() => {
           window.location.reload();
-        }, 500);
+        }, 800);
       } catch (e) {
-        setErrorMsg('Sıfırlama hatası oluştu.');
+        setErrorMsg('Sıfırlama hatası oluştu: ' + (e.message || e));
       }
     }
   };

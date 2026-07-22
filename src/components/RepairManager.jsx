@@ -9,14 +9,12 @@ import {
   AlertCircle,
   X,
   Smartphone,
-  Layers,
-  ArrowRightLeft,
   User,
   ShieldAlert,
   Printer,
-  MessageCircle,
   PlusCircle,
-  MinusCircle
+  MinusCircle,
+  PackageCheck
 } from 'lucide-react';
 import { repairService } from '../db/services/repairService';
 import { phoneService } from '../db/services/phoneService';
@@ -33,9 +31,10 @@ export default function RepairManager({ activePage, globalSearchQuery }) {
   // Modals
   const [showAddEditModal, setShowAddEditModal] = useState(false);
   const [editingRepair, setEditingRepair] = useState(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   
   // Filters
-  const [statusFilter, setStatusFilter] = useState(''); // All, Bekliyor, Tamirde, Hazır, Teslim Edildi
+  const [statusFilter, setStatusFilter] = useState('');
 
   // Quick Customer State
   const [isNewCustomer, setIsNewCustomer] = useState(false);
@@ -77,7 +76,6 @@ export default function RepairManager({ activePage, globalSearchQuery }) {
   const getFilteredRepairs = () => {
     let list = repairs;
 
-    // Quick search
     if (globalSearchQuery && globalSearchQuery.trim() !== '') {
       const q = globalSearchQuery.toLowerCase().trim();
       list = list.filter(r => 
@@ -87,7 +85,6 @@ export default function RepairManager({ activePage, globalSearchQuery }) {
       );
     }
 
-    // Status filter
     if (statusFilter) {
       list = list.filter(r => r.status === statusFilter);
     }
@@ -114,6 +111,7 @@ export default function RepairManager({ activePage, globalSearchQuery }) {
       devicePassword: '',
       warrantyMonths: '',
       spareParts: [],
+      usedParts: [],
       laborCost: ''
     });
     setFormError('');
@@ -129,25 +127,56 @@ export default function RepairManager({ activePage, globalSearchQuery }) {
       phoneDescription: repair.phoneDescription || '',
       defect: repair.defect || '',
       actionTaken: repair.actionTaken || '',
-      cost: repair.cost || '',
+      cost: repair.cost !== undefined ? repair.cost : '',
       status: repair.status || 'Bekliyor',
       technician: repair.technician || '',
       customerId: repair.customerId || '',
       devicePassword: repair.devicePassword || '',
       warrantyMonths: repair.warrantyMonths || '',
       spareParts: repair.spareParts || [],
-      laborCost: repair.laborCost || ''
+      usedParts: repair.usedParts || [],
+      laborCost: repair.laborCost || repair.laborFee || ''
     });
     setFormError('');
     setShowAddEditModal(true);
   };
 
-  // Save Form
+  // Requirement 3: Add stock part to usedParts array
+  const handleAddStockPart = (partId) => {
+    if (!partId) return;
+    const part = stockParts.find(p => p.id === partId);
+    if (!part) return;
+
+    setFormData(prev => {
+      const existing = (prev.usedParts || []).find(p => p.partId === partId);
+      let updated;
+      if (existing) {
+        updated = prev.usedParts.map(p => p.partId === partId ? {
+          ...p,
+          quantity: p.quantity + 1,
+          lineTotal: (p.quantity + 1) * p.unitSalePrice
+        } : p);
+      } else {
+        const item = {
+          partId: part.id,
+          nameSnapshot: part.name,
+          quantity: 1,
+          unitCostSnapshot: part.purchasePrice || 0,
+          unitSalePrice: part.salePrice || 0,
+          lineTotal: part.salePrice || 0
+        };
+        updated = [...(prev.usedParts || []), item];
+      }
+      return { ...prev, usedParts: updated };
+    });
+  };
+
+  // Save Form (Requirement 7: await repairService.save)
   const handleSaveRepair = async (e) => {
-    e.preventDefault();
+    if (e) e.preventDefault();
+    if (isSubmitting) return;
     setFormError('');
 
-    // Verification
     const isManualInput = !formData.phoneId;
     if (isManualInput && !formData.phoneDescription.trim()) {
       setFormError('Lütfen cihaz açıklamasını girin.');
@@ -159,12 +188,13 @@ export default function RepairManager({ activePage, globalSearchQuery }) {
     }
 
     try {
+      setIsSubmitting(true);
       let finalCustomerId = formData.customerId;
 
-      // Handle new customer creation
       if (isNewCustomer && newCustomer.fullName.trim()) {
         const custObj = await customerService.findOrCreate({
           name: newCustomer.fullName,
+          fullName: newCustomer.fullName,
           phone: newCustomer.phone
         });
         if (custObj) {
@@ -173,20 +203,18 @@ export default function RepairManager({ activePage, globalSearchQuery }) {
       }
 
       const payload = { ...formData, customerId: finalCustomerId };
+      delete payload.devicePassword;
 
-      // Do not store device password persistently per security policy
-      const payloadToSave = { ...payload };
-      delete payloadToSave.devicePassword;
-
-      await repairService.save(editingRepair ? { ...editingRepair, ...payloadToSave } : payloadToSave);
+      await repairService.save(editingRepair ? { ...editingRepair, ...payload } : payload);
       setShowAddEditModal(false);
       loadData();
     } catch (err) {
       setFormError(err.message || 'Servis kaydı kaydedilirken hata oluştu.');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
-  // Auto fill details if inventory phone selected
   const handlePhoneSelect = (pId) => {
     if (!pId) {
       setFormData(prev => ({ ...prev, phoneId: '', phoneDescription: '' }));
@@ -197,109 +225,66 @@ export default function RepairManager({ activePage, globalSearchQuery }) {
       setFormData(prev => ({
         ...prev,
         phoneId: phone.id,
-        phoneDescription: `${phone.brand} ${phone.model} (${phone.storage} - S/N: ${phone.serialNumber || 'Yok'})`
+        phoneDescription: `${phone.brand} ${phone.model} (${phone.storage} - S/N: ${phone.serialNumber || 'Yok'})`,
+        customerId: phone.boughtFromType === 'customer' ? phone.boughtFromId : prev.customerId
       }));
     }
   };
 
-  // Quick update Status
-  const handleQuickStatusChange = (repair, newStatus) => {
-    repairService.save({ ...repair, status: newStatus });
-    loadData();
-  };
-
-  // WhatsApp Integration
-  const handleWhatsAppClick = (repair) => {
-    if (!repair.customerId) {
-      alert("Bu tamir kaydı herhangi bir müşteriye bağlanmamış. Önce düzenleyerek müşteri seçiniz.");
-      return;
-    }
-    const customer = customers.find(c => c.id === repair.customerId);
-    if (!customer || !customer.phone) {
-      alert("Müşterinin kayıtlı bir telefon numarası bulunmuyor.");
-      return;
-    }
-
-    let phoneStr = customer.phone.replace(/\D/g, '');
-    if (phoneStr.startsWith('0')) {
-      phoneStr = '9' + phoneStr;
-    } else if (!phoneStr.startsWith('90') && phoneStr.length === 10) {
-      phoneStr = '90' + phoneStr;
-    }
-
-    const text = `Sayın ${customer.fullName}, ${repair.phoneDescription} cihazınızın servis işlemi ${repair.status === 'Hazır' ? 'tamamlanmıştır. Cihazınızı teslim alabilirsiniz.' : 'devam etmektedir.'} ${repair.cost > 0 ? `Toplam Tutar: ${repair.cost} TL` : ''}`;
-
-    window.open(`https://wa.me/${phoneStr}?text=${encodeURIComponent(text)}`, '_blank');
-  };
-
-  // Print Service Receipt
-  const handlePrintReceipt = (repairData, isTechnician = false) => {
-    if (isTechnician) {
-      if (!confirm('DİKKAT: Bu çıktı sadece teknisyen kullanımı içindir ve cihaz ekran şifresini içerir. Müşteriye vermeyiniz!')) return;
-    }
-    const customer = repairData.customerId ? customers.find(c => c.id === repairData.customerId) : null;
-    const printWindow = window.open('', '_blank', 'width=800,height=600');
-    if (!printWindow) {
-      alert("Popup engelleyiciyi kapatın.");
-      return;
-    }
+  const handlePrintReceipt = (repairData, isFormPasswordAllowed = false) => {
+    const cust = customers.find(c => c.id === repairData.customerId) || {};
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) return;
 
     const doc = printWindow.document;
-    doc.head.innerHTML = '<title>Servis Kabul Formu</title>';
-    
-    const style = doc.createElement('style');
-    style.textContent = `
-      body { font-family: system-ui, sans-serif; padding: 40px; color: #111; }
-      .header { text-align: center; border-bottom: 2px solid #eee; padding-bottom: 20px; margin-bottom: 30px; }
-      .title { font-size: 24px; font-weight: bold; margin: 0; }
-      .meta { display: flex; justify-content: space-between; margin-bottom: 30px; font-size: 14px; }
-      .box { border: 1px solid #ccc; padding: 15px; border-radius: 8px; margin-bottom: 20px; }
-      .label { font-weight: bold; color: #555; font-size: 12px; text-transform: uppercase; margin-bottom: 5px; }
-      .val { font-size: 16px; margin-bottom: 15px; }
-      table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-      th, td { padding: 10px; border-bottom: 1px solid #eee; text-align: left; }
-      .signatures { display: flex; justify-content: space-between; margin-top: 50px; }
-      .sign-box { width: 45%; text-align: center; border-top: 1px solid #000; padding-top: 10px; }
-      .tech-warn { color: red; font-weight: bold; text-align: center; margin-bottom: 10px; border: 2px dashed red; padding: 10px; }
-    `;
-    doc.head.appendChild(style);
+    doc.write(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Teknik Servis Fişi - ${escapeHtml(repairData.phoneDescription || 'Cihaz')}</title>
+        <style>
+          body { font-family: sans-serif; padding: 20px; color: #333; }
+          .header { text-align: center; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 20px; }
+          .box { border: 1px solid #ccc; padding: 10px; margin-bottom: 15px; border-radius: 5px; }
+          .label { font-weight: bold; color: #666; font-size: 12px; }
+          .val { font-size: 14px; margin-bottom: 5px; }
+          table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+          th, td { border: 1px solid #ddd; padding: 6px; font-size: 12px; }
+          .signatures { margin-top: 40px; display: flex; justify-content: space-between; font-size: 12px; }
+          .sign-box { border-top: 1px solid #aaa; width: 40%; text-align: center; padding-top: 5px; }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <h2>TEKNİK SERVİS TESLİM FİŞİ</h2>
+          <p>Tarih: ${new Date().toLocaleDateString('tr-TR')}</p>
+        </div>
+        <div id="content"></div>
+      </body>
+      </html>
+    `);
 
-    const container = doc.createElement('div');
-    
-    if (isTechnician) {
-      const warn = doc.createElement('div');
-      warn.className = 'tech-warn';
-      warn.textContent = 'DİKKAT: TEKNİSYEN KOPYASI - MÜŞTERİYE VERMEYİNİZ!';
-      container.appendChild(warn);
-    }
-
-    const header = doc.createElement('div');
-    header.className = 'header';
-    header.innerHTML = '<h1 class="title">TEKNİK SERVİS FORMU</h1><div id="p-id"></div>';
-    header.querySelector('#p-id').textContent = 'Kayıt No: ' + (repairData.id ? repairData.id.replace('rep-', '') : 'KAYDEDİLMEMİŞ TASLAK');
-    container.appendChild(header);
-
-    const meta = doc.createElement('div');
-    meta.className = 'meta';
-    meta.innerHTML = '<div><strong>Tarih:</strong> <span id="p-date"></span></div><div><strong>Teknisyen:</strong> <span id="p-tech"></span></div>';
-    meta.querySelector('#p-date').textContent = new Date().toLocaleDateString('tr-TR');
-    meta.querySelector('#p-tech').textContent = repairData.technician || 'Belirtilmedi';
-    container.appendChild(meta);
+    const container = doc.getElementById('content');
 
     const box1 = doc.createElement('div');
     box1.className = 'box';
     box1.innerHTML = `
-      <div class="label">Müşteri Bilgileri</div><div class="val" id="p-cust"></div>
-      <div class="label">Cihaz Tanımı</div><div class="val" id="p-desc"></div>
-      <div class="label">Arıza / Şikayet</div><div class="val" id="p-def"></div>
-      <div class="label">Cihaz Şifresi / Deseni</div><div class="val" id="p-pass"></div>
+      <div class="label">Müşteri Bilgileri</div>
+      <div class="val" id="p-cust"></div>
+      <div class="label">Cihaz Bilgisi</div>
+      <div class="val" id="p-phone"></div>
+      <div class="label">Arıza Şikayeti</div>
+      <div class="val" id="p-defect"></div>
+      <div class="label">Cihaz Ekran Şifresi</div>
+      <div class="val" id="p-pass"></div>
     `;
-    box1.querySelector('#p-cust').textContent = customer ? (customer.fullName + ' - ' + customer.phone) : 'Kayıtsız Müşteri';
-    box1.querySelector('#p-desc').textContent = repairData.phoneDescription || '-';
-    box1.querySelector('#p-def').textContent = repairData.defect || '-';
+
+    box1.querySelector('#p-cust').textContent = (cust.fullName || cust.name || 'Bilinmiyor') + (cust.phone ? ` (${cust.phone})` : '');
+    box1.querySelector('#p-phone').textContent = repairData.phoneDescription || '-';
+    box1.querySelector('#p-defect').textContent = repairData.defect || '-';
     
     let passVal = repairData.devicePassword || 'Yok / Belirtilmedi';
-    if (!isTechnician && passVal !== 'Yok / Belirtilmedi') {
+    if (!isFormPasswordAllowed && passVal !== 'Yok / Belirtilmedi') {
       passVal = '[GİZLENDİ]';
     }
     box1.querySelector('#p-pass').textContent = passVal;
@@ -311,18 +296,21 @@ export default function RepairManager({ activePage, globalSearchQuery }) {
     box2.querySelector('#p-act').textContent = repairData.actionTaken || '-';
     box2.querySelector('#p-cost').textContent = repairData.cost || 0;
     
-    if (repairData.spareParts && repairData.spareParts.length > 0) {
+    if (repairData.usedParts && repairData.usedParts.length > 0) {
       const partsDiv = doc.createElement('div');
-      partsDiv.innerHTML = '<div class="label" style="margin-top:20px;">Kullanılan Parçalar</div><table><tr><th>Parça Adı</th><th style="text-align:right">Fiyat</th></tr><tbody id="p-parts-body"></tbody></table>';
+      partsDiv.innerHTML = '<div class="label" style="margin-top:20px;">Kullanılan Parçalar</div><table><tr><th>Parça Adı</th><th>Miktar</th><th style="text-align:right">Satır Toplamı</th></tr><tbody id="p-parts-body"></tbody></table>';
       const tbody = partsDiv.querySelector('#p-parts-body');
-      repairData.spareParts.forEach(p => {
+      repairData.usedParts.forEach(p => {
         const tr = doc.createElement('tr');
         const tdName = doc.createElement('td');
-        tdName.textContent = p.name;
+        tdName.textContent = p.nameSnapshot || p.name;
+        const tdQty = doc.createElement('td');
+        tdQty.textContent = p.quantity || 1;
         const tdPrice = doc.createElement('td');
         tdPrice.style.textAlign = 'right';
-        tdPrice.textContent = p.price + ' TL';
+        tdPrice.textContent = (p.lineTotal || (p.quantity * p.unitSalePrice)) + ' TL';
         tr.appendChild(tdName);
+        tr.appendChild(tdQty);
         tr.appendChild(tdPrice);
         tbody.appendChild(tr);
       });
@@ -348,11 +336,14 @@ export default function RepairManager({ activePage, globalSearchQuery }) {
     };
   };
 
-  // Delete Action
-  const handleDeleteRepair = (id) => {
+  const handleDeleteRepair = async (id) => {
     if (confirm('Bu teknik servis kaydını silmek istediğinize emin misiniz?')) {
-      repairService.delete(id);
-      loadData();
+      try {
+        await repairService.delete(id);
+        loadData();
+      } catch (err) {
+        alert(err.message || "Servis kaydı silinemedi.");
+      }
     }
   };
 
@@ -370,67 +361,23 @@ export default function RepairManager({ activePage, globalSearchQuery }) {
     );
   };
 
+  const calculatedPartsSaleTotal = (formData.usedParts || []).reduce((s, p) => s + Number(p.lineTotal || (p.quantity * p.unitSalePrice) || 0), 0) +
+    (formData.spareParts || []).reduce((s, p) => s + Number(p.price || 0), 0);
+  const calculatedGrandTotal = calculatedPartsSaleTotal + Number(formData.laborCost || 0);
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 text-xs">
       
       {/* FILTER BUTTONS & ADD BUTTON ROW */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 no-print">
-        
-        {/* Status Quick Filter Badges */}
         <div className="flex bg-slate-100 dark:bg-slate-900 p-1 rounded-xl border border-slate-200 dark:border-slate-800 flex-wrap gap-1">
-          <button
-            onClick={() => setStatusFilter('')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-              statusFilter === ''
-                ? 'bg-white dark:bg-slate-800 text-slate-850 dark:text-white shadow-sm'
-                : 'text-slate-500 hover:text-slate-700'
-            }`}
-          >
-            Tümü
-          </button>
-          <button
-            onClick={() => setStatusFilter('Bekliyor')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-              statusFilter === 'Bekliyor'
-                ? 'bg-white dark:bg-slate-800 text-slate-850 dark:text-white shadow-sm'
-                : 'text-slate-500 hover:text-slate-750'
-            }`}
-          >
-            Bekleyenler
-          </button>
-          <button
-            onClick={() => setStatusFilter('Tamirde')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-              statusFilter === 'Tamirde'
-                ? 'bg-white dark:bg-slate-800 text-slate-850 dark:text-white shadow-sm'
-                : 'text-slate-500 hover:text-slate-750'
-            }`}
-          >
-            Tamirdekiler
-          </button>
-          <button
-            onClick={() => setStatusFilter('Hazır')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-              statusFilter === 'Hazır'
-                ? 'bg-white dark:bg-slate-800 text-slate-850 dark:text-white shadow-sm'
-                : 'text-slate-500 hover:text-slate-750'
-            }`}
-          >
-            Hazır / Tamamlanan
-          </button>
-          <button
-            onClick={() => setStatusFilter('Teslim Edildi')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-              statusFilter === 'Teslim Edildi'
-                ? 'bg-white dark:bg-slate-800 text-slate-850 dark:text-white shadow-sm'
-                : 'text-slate-500 hover:text-slate-750'
-            }`}
-          >
-            Teslim Edilenler
-          </button>
+          <button onClick={() => setStatusFilter('')} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${statusFilter === '' ? 'bg-white dark:bg-slate-800 text-slate-850 dark:text-white shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Tümü</button>
+          <button onClick={() => setStatusFilter('Bekliyor')} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${statusFilter === 'Bekliyor' ? 'bg-white dark:bg-slate-800 text-slate-850 dark:text-white shadow-sm' : 'text-slate-500 hover:text-slate-750'}`}>Bekleyenler</button>
+          <button onClick={() => setStatusFilter('Tamirde')} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${statusFilter === 'Tamirde' ? 'bg-white dark:bg-slate-800 text-slate-850 dark:text-white shadow-sm' : 'text-slate-500 hover:text-slate-750'}`}>Tamirdekiler</button>
+          <button onClick={() => setStatusFilter('Hazır')} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${statusFilter === 'Hazır' ? 'bg-white dark:bg-slate-800 text-slate-850 dark:text-white shadow-sm' : 'text-slate-500 hover:text-slate-750'}`}>Hazır / Tamamlanan</button>
+          <button onClick={() => setStatusFilter('Teslim Edildi')} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${statusFilter === 'Teslim Edildi' ? 'bg-white dark:bg-slate-800 text-slate-850 dark:text-white shadow-sm' : 'text-slate-500 hover:text-slate-750'}`}>Teslim Edilenler</button>
         </div>
 
-        {/* Add Button */}
         <button
           onClick={handleAddClick}
           className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-750 active:scale-[0.98] transition text-white font-semibold text-xs flex items-center gap-1.5 shadow-md shadow-indigo-600/10 cursor-pointer"
@@ -448,390 +395,241 @@ export default function RepairManager({ activePage, globalSearchQuery }) {
               <tr className="bg-slate-50 dark:bg-slate-850/50 border-b border-slate-200 dark:border-slate-800 text-slate-500 uppercase font-bold tracking-wider">
                 <th className="p-4 py-3.5">Cihaz Tanımı</th>
                 <th className="p-4 py-3.5">Arıza / Şikayet</th>
-                <th className="p-4 py-3.5">Yapılan İşlem / Durum Notu</th>
-                <th className="p-4 py-3.5 text-right">Servis Masrafı</th>
-                <th className="p-4 py-3.5 text-center">Durum</th>
-                <th className="p-4 py-3.5 text-center no-print">Hızlı Aşama</th>
-                <th className="p-4 py-3.5 text-center no-print">İşlemler</th>
+                <th className="p-4 py-3.5">Müşteri</th>
+                <th className="p-4 py-3.5">Teknisyen</th>
+                <th className="p-4 py-3.5">Tutar</th>
+                <th className="p-4 py-3.5">Durum</th>
+                <th className="p-4 py-3.5 text-right">İşlemler</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60">
+            <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-medium">
               {filteredRepairs.length === 0 ? (
                 <tr>
-                  <td colSpan="7" className="p-8 text-center text-slate-400 font-medium">
-                    Serviste işlem bekleyen veya tamamlanmış cihaz bulunmamaktadır.
+                  <td colSpan="7" className="p-8 text-center text-slate-400">
+                    Kayıtlı teknik servis kaydı bulunamadı.
                   </td>
                 </tr>
               ) : (
-                filteredRepairs.map((rep) => (
-                  <tr key={rep.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-850/30 transition-colors">
-                    
-                    {/* Device Description */}
-                    <td className="p-4">
-                      <div className="font-bold text-slate-850 dark:text-white">{rep.phoneDescription}</div>
-                      {rep.phoneId ? (
-                        <span className="inline-flex items-center text-[10px] text-indigo-500 font-semibold bg-indigo-50 dark:bg-indigo-950/20 px-1 rounded mt-1">
-                          Envanter Cihazı
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center text-[10px] text-slate-500 font-semibold bg-slate-50 dark:bg-slate-800 px-1 rounded mt-1">
-                          Müşteri Cihazı
-                        </span>
-                      )}
-                    </td>
-
-                    {/* Defect */}
-                    <td className="p-4 text-slate-700 dark:text-slate-350 max-w-[180px] truncate" title={rep.defect}>
-                      {rep.defect}
-                    </td>
-
-                    {/* Action Taken */}
-                    <td className="p-4 text-slate-600 dark:text-slate-400 italic max-w-[200px] truncate" title={rep.actionTaken}>
-                      {rep.actionTaken || <span className="text-slate-300">- İşlem Yok -</span>}
-                    </td>
-
-                    {/* Cost */}
-                    <td className="p-4 text-right font-bold text-slate-850 dark:text-white">
-                      {rep.cost > 0 ? `${rep.cost.toLocaleString('tr-TR')} TL` : 'Ücretsiz / Tespitsiz'}
-                    </td>
-
-                    {/* Status Badge */}
-                    <td className="p-4 text-center">
-                      {getStatusBadge(rep.status)}
-                    </td>
-
-                    {/* Quick status cycle button */}
-                    <td className="p-4 text-center no-print">
-                      <div className="inline-flex rounded-lg border border-slate-200 dark:border-slate-800 p-0.5 bg-slate-50 dark:bg-slate-950">
-                        <button
-                          onClick={() => handleQuickStatusChange(rep, 'Tamirde')}
-                          className={`px-2 py-1 rounded-md text-[10px] font-bold cursor-pointer ${
-                            rep.status === 'Tamirde' ? 'bg-amber-500 text-white shadow-sm' : 'text-slate-500'
-                          }`}
-                          title="Tamire Al"
-                        >
-                          Tamirde
-                        </button>
-                        <button
-                          onClick={() => handleQuickStatusChange(rep, 'Hazır')}
-                          className={`px-2 py-1 rounded-md text-[10px] font-bold cursor-pointer ${
-                            rep.status === 'Hazır' ? 'bg-indigo-650 text-white shadow-sm' : 'text-slate-500'
-                          }`}
-                          title="Hazır Yap"
-                        >
-                          Hazır
-                        </button>
-                        <button
-                          onClick={() => handleQuickStatusChange(rep, 'Teslim Edildi')}
-                          className={`px-2 py-1 rounded-md text-[10px] font-bold cursor-pointer ${
-                            rep.status === 'Teslim Edildi' ? 'bg-slate-600 text-white shadow-sm' : 'text-slate-500'
-                          }`}
-                          title="Teslim Et"
-                        >
-                          Teslim
-                        </button>
-                      </div>
-                    </td>
-
-                    {/* Action buttons */}
-                    <td className="p-4 text-center space-x-1 whitespace-nowrap no-print">
-                      <button
-                        onClick={() => handleWhatsAppClick(rep)}
-                        className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:bg-green-50 dark:hover:bg-green-950/20 text-slate-500 hover:text-green-600 cursor-pointer"
-                        title="Müşteriye WhatsApp'tan Yaz"
-                      >
-                        <MessageCircle size={13} />
-                      </button>
-                      <button
-                        onClick={() => handlePrintReceipt(rep)}
-                        className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:bg-blue-50 dark:hover:bg-blue-950/20 text-slate-500 hover:text-blue-600 cursor-pointer"
-                        title="Servis Formu Yazdır"
-                      >
-                        <Printer size={13} />
-                      </button>
-                      <button
-                        onClick={() => handleEditClick(rep)}
-                        className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:bg-amber-50 dark:hover:bg-amber-950/20 text-slate-500 hover:text-amber-650 cursor-pointer"
-                        title="Düzenle"
-                      >
-                        <Edit3 size={13} />
-                      </button>
-                      <button
-                        onClick={() => handleDeleteRepair(rep.id)}
-                        className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:bg-red-50 dark:hover:bg-red-950/20 text-slate-500 hover:text-red-650 cursor-pointer"
-                        title="Sil"
-                      >
-                        <Trash2 size={13} />
-                      </button>
-                    </td>
-                  </tr>
-                ))
+                filteredRepairs.map((repair) => {
+                  const cust = customers.find(c => c.id === repair.customerId);
+                  return (
+                    <tr key={repair.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-850/40 transition">
+                      <td className="p-4 font-bold text-slate-800 dark:text-slate-200">
+                        {repair.phoneDescription || 'Cihaz'}
+                      </td>
+                      <td className="p-4 text-slate-600 dark:text-slate-400">{repair.defect}</td>
+                      <td className="p-4 text-slate-700 dark:text-slate-300 font-semibold">
+                        {cust ? (cust.fullName || cust.name) : 'Bilinmeyen'}
+                      </td>
+                      <td className="p-4 text-slate-500">{repair.technician || '-'}</td>
+                      <td className="p-4 font-bold font-mono text-indigo-600 dark:text-indigo-400">
+                        {repair.cost !== undefined && repair.cost !== '' ? Number(repair.cost).toLocaleString('tr-TR') + ' TL' : (repair.totalPrice ? Number(repair.totalPrice).toLocaleString('tr-TR') + ' TL' : '0 TL')}
+                      </td>
+                      <td className="p-4">{getStatusBadge(repair.status)}</td>
+                      <td className="p-4 text-right space-x-2">
+                        <button onClick={() => handlePrintReceipt(repair)} className="p-1.5 text-slate-400 hover:text-slate-600 cursor-pointer" title="Fiş Yazdır"><Printer size={15} /></button>
+                        <button onClick={() => handleEditClick(repair)} className="p-1.5 text-indigo-600 hover:text-indigo-800 cursor-pointer" title="Düzenle"><Edit3 size={15} /></button>
+                        <button onClick={() => handleDeleteRepair(repair.id)} className="p-1.5 text-red-500 hover:text-red-700 cursor-pointer" title="Sil"><Trash2 size={15} /></button>
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
         </div>
       </div>
 
-      {/* ADD / EDIT REPAIR MODAL */}
+      {/* ADD / EDIT MODAL */}
       {showAddEditModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-in fade-in duration-100">
-          <div className="bg-white dark:bg-slate-900 border border-slate-250 dark:border-slate-800 rounded-2xl shadow-xl max-w-md w-full animate-in zoom-in-95 duration-100 text-xs">
-            
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 overflow-y-auto">
+          <div className="w-full max-w-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl max-h-[90vh] flex flex-col animate-in zoom-in-95 duration-150">
             <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center bg-slate-50 dark:bg-slate-900/50">
-              <h3 className="font-bold uppercase tracking-wider text-slate-850 dark:text-white">
+              <h3 className="font-bold text-xs uppercase tracking-wider text-slate-850 dark:text-white flex items-center gap-1.5">
+                <Wrench className="text-indigo-650" size={16} />
                 {editingRepair ? 'Servis Kaydını Düzenle' : 'Yeni Servis Kaydı Aç'}
               </h3>
-              <button onClick={() => setShowAddEditModal(false)} className="text-slate-400 hover:text-slate-650">
+              <button onClick={() => setShowAddEditModal(false)} className="text-slate-400 hover:text-slate-600 cursor-pointer">
                 <X size={18} />
               </button>
             </div>
 
-            <form onSubmit={handleSaveRepair} className="p-5 space-y-4 max-h-[80vh] overflow-y-auto">
+            <form onSubmit={handleSaveRepair} className="p-6 space-y-4 overflow-y-auto flex-1 text-xs">
               {formError && (
-                <div className="p-2.5 bg-red-50 dark:bg-red-950/20 text-red-650 dark:text-red-400 border border-red-200 dark:border-red-900 rounded-xl flex items-center gap-1">
-                  <AlertCircle size={15} />
+                <div className="p-3 bg-red-50 text-red-600 rounded-xl border border-red-200 flex items-center gap-2">
+                  <AlertCircle size={16} />
                   <span>{formError}</span>
                 </div>
               )}
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {/* Link to Inventory Phone */}
-                <div className="space-y-1">
-                  <label className="font-semibold text-slate-500 uppercase tracking-wide">Envanterdeki Telefona Bağla</label>
+              {/* Customer Select / Create */}
+              <div className="space-y-1">
+                <div className="flex justify-between items-center">
+                  <label className="font-semibold text-slate-500 uppercase tracking-wide">Müşteri *</label>
+                  <label className="flex items-center gap-1 text-[11px] text-indigo-600 cursor-pointer">
+                    <input type="checkbox" checked={isNewCustomer} onChange={(e) => setIsNewCustomer(e.target.checked)} className="rounded" />
+                    Yeni Müşteri Oluştur
+                  </label>
+                </div>
+                {!isNewCustomer ? (
                   <select
-                    value={formData.phoneId}
-                    onChange={(e) => handlePhoneSelect(e.target.value)}
-                    disabled={editingRepair}
-                    className="w-full p-2.5 border border-slate-200 dark:border-slate-800 rounded-xl bg-transparent"
+                    value={formData.customerId}
+                    onChange={(e) => setFormData(prev => ({ ...prev, customerId: e.target.value }))}
+                    className="w-full p-2.5 border border-slate-200 dark:border-slate-800 rounded-xl bg-transparent font-bold"
                   >
-                    <option value="">Envanter Dışı</option>
-                    {phones.map(p => (
-                      <option key={p.id} value={p.id}>{p.brand} {p.model} ({p.storage})</option>
+                    <option value="">Müşteri Seçin</option>
+                    {customers.map(c => <option key={c.id} value={c.id}>{c.fullName || c.name} ({c.phone || 'Tel Yok'})</option>)}
+                  </select>
+                ) : (
+                  <div className="grid grid-cols-2 gap-2">
+                    <input type="text" placeholder="Ad Soyad *" value={newCustomer.fullName} onChange={(e) => setNewCustomer(prev => ({ ...prev, fullName: e.target.value }))} className="p-2 border rounded-xl bg-transparent font-bold" />
+                    <input type="text" placeholder="Telefon *" value={newCustomer.phone} onChange={(e) => setNewCustomer(prev => ({ ...prev, phone: e.target.value }))} className="p-2 border rounded-xl bg-transparent font-bold" />
+                  </div>
+                )}
+              </div>
+
+              {/* Device & Defect */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="font-semibold text-slate-500 uppercase">Cihaz Açıklaması *</label>
+                  <input type="text" value={formData.phoneDescription} onChange={(e) => setFormData(prev => ({ ...prev, phoneDescription: e.target.value }))} placeholder="iPhone 11 Siyah" className="w-full p-2.5 border rounded-xl bg-transparent font-bold" required />
+                </div>
+                <div>
+                  <label className="font-semibold text-slate-500 uppercase">Cihaz Ekran Şifresi</label>
+                  <input type="text" value={formData.devicePassword} onChange={(e) => setFormData(prev => ({ ...prev, devicePassword: e.target.value }))} placeholder="123456 (Sadece yazdırılır)" className="w-full p-2.5 border rounded-xl bg-transparent font-bold" />
+                </div>
+              </div>
+
+              <div>
+                <label className="font-semibold text-slate-500 uppercase">Arıza Şikayeti *</label>
+                <textarea value={formData.defect} onChange={(e) => setFormData(prev => ({ ...prev, defect: e.target.value }))} placeholder="Ekran kırık, dokunmatik basmıyor..." rows="2" className="w-full p-2.5 border rounded-xl bg-transparent" required />
+              </div>
+
+              {/* Requirement 3: Central Stock Parts Selection UI */}
+              <div className="p-3 border border-indigo-500/30 rounded-xl bg-indigo-500/5 space-y-3">
+                <div className="flex justify-between items-center font-bold text-indigo-600 dark:text-indigo-400">
+                  <span className="flex items-center gap-1.5"><PackageCheck size={16} /> MERKEZİ STOKTAN PARÇA KULLANIMI</span>
+                  <select
+                    onChange={(e) => {
+                      handleAddStockPart(e.target.value);
+                      e.target.value = '';
+                    }}
+                    className="p-1.5 border border-indigo-500/30 rounded-lg bg-white dark:bg-slate-900 text-xs font-bold text-slate-800 dark:text-white"
+                  >
+                    <option value="">+ Stoktan Parça Ekle</option>
+                    {stockParts.map(sp => (
+                      <option key={sp.id} value={sp.id} disabled={sp.quantity <= 0}>
+                        {sp.name} (Stok: {sp.quantity} | {sp.salePrice} TL)
+                      </option>
                     ))}
                   </select>
                 </div>
 
-                {/* Link to Customer */}
-                <div className="space-y-1">
-                  <div className="flex justify-between items-center">
-                    <label className="font-semibold text-slate-500 uppercase tracking-wide text-[10px]">Müşteri Seçimi (Opsiyonel)</label>
-                    <button 
-                      type="button" 
-                      onClick={() => setIsNewCustomer(!isNewCustomer)}
-                      className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 text-[10px] font-bold"
-                    >
-                      {isNewCustomer ? "Listeden Seç" : "+ Yeni Müşteri Ekle"}
-                    </button>
+                {(formData.usedParts || []).length > 0 && (
+                  <div className="space-y-2">
+                    {formData.usedParts.map((partItem, idx) => (
+                      <div key={idx} className="grid grid-cols-12 gap-2 items-center bg-white dark:bg-slate-900 p-2 rounded-lg border border-slate-200 dark:border-slate-800">
+                        <div className="col-span-4 font-bold text-slate-800 dark:text-white truncate">
+                          {partItem.nameSnapshot}
+                        </div>
+                        <div className="col-span-2">
+                          <label className="text-[9px] text-slate-400 block">Adet</label>
+                          <input
+                            type="number"
+                            min="1"
+                            value={partItem.quantity}
+                            onChange={(e) => {
+                              const qty = Math.max(1, parseInt(e.target.value || 1, 10));
+                              const updated = [...formData.usedParts];
+                              updated[idx] = {
+                                ...updated[idx],
+                                quantity: qty,
+                                lineTotal: qty * updated[idx].unitSalePrice
+                              };
+                              setFormData(prev => ({ ...prev, usedParts: updated }));
+                            }}
+                            className="w-full p-1 border rounded bg-transparent font-bold text-center"
+                          />
+                        </div>
+                        <div className="col-span-2">
+                          <label className="text-[9px] text-slate-400 block">Birim Fiyat</label>
+                          <input
+                            type="number"
+                            min="0"
+                            value={partItem.unitSalePrice}
+                            onChange={(e) => {
+                              const price = Number(e.target.value || 0);
+                              const updated = [...formData.usedParts];
+                              updated[idx] = {
+                                ...updated[idx],
+                                unitSalePrice: price,
+                                lineTotal: updated[idx].quantity * price
+                              };
+                              setFormData(prev => ({ ...prev, usedParts: updated }));
+                            }}
+                            className="w-full p-1 border rounded bg-transparent font-bold"
+                          />
+                        </div>
+                        <div className="col-span-3 text-right font-bold text-teal-600">
+                          {((partItem.quantity || 1) * (partItem.unitSalePrice || 0)).toLocaleString('tr-TR')} TL
+                        </div>
+                        <div className="col-span-1 text-right">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const updated = [...formData.usedParts];
+                              updated.splice(idx, 1);
+                              setFormData(prev => ({ ...prev, usedParts: updated }));
+                            }}
+                            className="text-rose-500 hover:text-rose-700 cursor-pointer"
+                          >
+                            <MinusCircle size={15} />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                  
-                  {isNewCustomer ? (
-                    <div className="flex gap-2">
-                      <input 
-                        type="text" 
-                        placeholder="Ad Soyad" 
-                        value={newCustomer.fullName}
-                        onChange={(e) => setNewCustomer(prev => ({ ...prev, fullName: e.target.value }))}
-                        className="w-1/2 p-2.5 border border-slate-200 dark:border-slate-800 rounded-xl bg-transparent"
-                        required
-                      />
-                      <input 
-                        type="tel" 
-                        placeholder="Telefon" 
-                        value={newCustomer.phone}
-                        onChange={(e) => setNewCustomer(prev => ({ ...prev, phone: e.target.value }))}
-                        className="w-1/2 p-2.5 border border-slate-200 dark:border-slate-800 rounded-xl bg-transparent"
-                      />
-                    </div>
-                  ) : (
-                    <select
-                      value={formData.customerId}
-                      onChange={(e) => setFormData(prev => ({ ...prev, customerId: e.target.value }))}
-                      className="w-full p-2.5 border border-slate-200 dark:border-slate-800 rounded-xl bg-transparent"
-                    >
-                      <option value="">Müşteri Seçilmedi</option>
-                      {customers.map(c => (
-                        <option key={c.id} value={c.id}>{c.fullName} - {c.phone}</option>
-                      ))}
-                    </select>
-                  )}
-                </div>
+                )}
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {/* Device Text Description (Required if manual) */}
-                <div className="space-y-1">
-                  <label className="font-semibold text-slate-500 uppercase tracking-wide">Cihaz Açıklaması *</label>
-                  <input
-                    type="text"
-                    value={formData.phoneDescription}
-                    onChange={(e) => setFormData(prev => ({ ...prev, phoneDescription: e.target.value }))}
-                    disabled={!!formData.phoneId}
-                    placeholder="Örn: iPhone Xs Max Beyaz"
-                    className="w-full p-2.5 border border-slate-200 dark:border-slate-800 rounded-xl bg-transparent disabled:bg-slate-50 dark:disabled:bg-slate-950"
-                    required={!formData.phoneId}
-                  />
-                </div>
-
-                {/* Device Password */}
-                <div className="space-y-1">
-                  <label className="font-semibold text-slate-500 uppercase tracking-wide flex items-center gap-1"><ShieldAlert size={14}/> Cihaz Şifresi/Deseni</label>
-                  <input
-                    type="text"
-                    value={formData.devicePassword}
-                    onChange={(e) => setFormData(prev => ({ ...prev, devicePassword: e.target.value }))}
-                    placeholder="Ekran şifresi (SADECE yazdırılır, KAYDEDİLMEZ)"
-                    className="w-full p-2.5 border border-slate-200 dark:border-slate-800 rounded-xl bg-transparent"
-                  />
-                  <div className="text-[9px] text-amber-600 mt-1">
-                    Güvenlik nedeni ile şifreler veritabanına kaydedilmez. Yalnızca formu yazdırırken görünür.
-                  </div>
-                </div>
-              </div>
-
-              {/* Defect Details */}
-              <div className="space-y-1">
-                <label className="font-semibold text-slate-500 uppercase tracking-wide">Arıza Şikayeti / Detayı *</label>
-                <textarea
-                  value={formData.defect}
-                  onChange={(e) => setFormData(prev => ({ ...prev, defect: e.target.value }))}
-                  placeholder="Ekranda sararma var, şarj olmuyor vb..."
-                  rows="2"
-                  className="w-full p-2.5 border border-slate-200 dark:border-slate-800 rounded-xl bg-transparent"
-                  required
-                />
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {/* Technician */}
-                <div className="space-y-1">
-                  <label className="font-semibold text-slate-500 uppercase tracking-wide flex items-center gap-1"><User size={14}/> Sorumlu Teknisyen</label>
-                  <input
-                    type="text"
-                    value={formData.technician}
-                    onChange={(e) => setFormData(prev => ({ ...prev, technician: e.target.value }))}
-                    placeholder="Teknisyen Adı"
-                    className="w-full p-2.5 border border-slate-200 dark:border-slate-800 rounded-xl bg-transparent"
-                  />
-                </div>
-
-                {/* Warranty */}
-                <div className="space-y-1">
-                  <label className="font-semibold text-slate-500 uppercase tracking-wide">Garanti Süresi (Ay)</label>
-                  <input
-                    type="number"
-                    value={formData.warrantyMonths}
-                    onChange={(e) => setFormData(prev => ({ ...prev, warrantyMonths: e.target.value }))}
-                    placeholder="Örn: 6"
-                    className="w-full p-2.5 border border-slate-200 dark:border-slate-800 rounded-xl bg-transparent"
-                  />
-                </div>
-              </div>
-
-              {/* Action Taken */}
-              <div className="space-y-1">
-                <label className="font-semibold text-slate-500 uppercase tracking-wide">Yapılan İşlem / Süreç Notu</label>
-                <textarea
-                  value={formData.actionTaken}
-                  onChange={(e) => setFormData(prev => ({ ...prev, actionTaken: e.target.value }))}
-                  placeholder="Entegre tamiri denendi, parça bekliyor..."
-                  rows="2"
-                  className="w-full p-2.5 border border-slate-200 dark:border-slate-800 rounded-xl bg-transparent"
-                />
-              </div>
-
-              {/* Spare Parts & Cost Section */}
-              <div className="p-3 border border-slate-200 dark:border-slate-800 rounded-xl bg-slate-50/50 dark:bg-slate-850/30 space-y-3">
-                <div className="font-bold text-xs text-slate-700 dark:text-slate-300 flex justify-between items-center">
-                  <span>YEDEK PARÇA VE İŞÇİLİK</span>
-                  <button 
-                    type="button" 
-                    onClick={() => setFormData(prev => ({ ...prev, spareParts: [...prev.spareParts, { name: '', price: '' }] }))}
-                    className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 flex items-center gap-1 cursor-pointer text-[10px]"
-                  >
-                    <PlusCircle size={12}/> Parça Ekle
+              {/* Legacy Free-Text Parts & Labor */}
+              <div className="p-3 border rounded-xl bg-slate-50 dark:bg-slate-950 space-y-3">
+                <div className="flex justify-between items-center font-bold text-slate-700 dark:text-slate-300">
+                  <span>SERBEST MANUEL PARÇALAR & İŞÇİLİK</span>
+                  <button type="button" onClick={() => setFormData(prev => ({ ...prev, spareParts: [...prev.spareParts, { name: '', price: '' }] }))} className="text-indigo-600 hover:underline flex items-center gap-1 text-[11px] cursor-pointer">
+                    <PlusCircle size={13} /> Manuel Parça Ekle
                   </button>
                 </div>
-                
-                {formData.spareParts.map((part, index) => (
-                  <div key={index} className="flex gap-2 items-center">
-                    <input 
-                      type="text" 
-                      placeholder="Parça Adı (Örn: Orijinal Ekran)" 
-                      value={part.name}
-                      onChange={(e) => {
-                        const newParts = [...formData.spareParts];
-                        newParts[index].name = e.target.value;
-                        setFormData(prev => ({ ...prev, spareParts: newParts }));
-                      }}
-                      className="flex-1 p-2 border border-slate-200 dark:border-slate-800 rounded-lg bg-white dark:bg-slate-900"
-                    />
-                    <input 
-                      type="number" 
-                      placeholder="Fiyat" 
-                      value={part.price}
-                      onChange={(e) => {
-                        const newParts = [...formData.spareParts];
-                        newParts[index].price = e.target.value;
-                        setFormData(prev => ({ ...prev, spareParts: newParts }));
-                      }}
-                      className="w-24 p-2 border border-slate-200 dark:border-slate-800 rounded-lg bg-white dark:bg-slate-900"
-                    />
-                    <button 
-                      type="button" 
-                      onClick={() => {
-                        const newParts = [...formData.spareParts];
-                        newParts.splice(index, 1);
-                        setFormData(prev => ({ ...prev, spareParts: newParts }));
-                      }}
-                      className="text-red-500 hover:text-red-700 p-1 cursor-pointer"
-                    >
-                      <MinusCircle size={14}/>
-                    </button>
+
+                {formData.spareParts.map((sp, idx) => (
+                  <div key={idx} className="flex gap-2 items-center">
+                    <input type="text" placeholder="Parça Adı" value={sp.name} onChange={(e) => { const n = [...formData.spareParts]; n[idx].name = e.target.value; setFormData(prev => ({ ...prev, spareParts: n })); }} className="flex-1 p-2 border rounded bg-white dark:bg-slate-900" />
+                    <input type="number" placeholder="Fiyat" value={sp.price} onChange={(e) => { const n = [...formData.spareParts]; n[idx].price = e.target.value; setFormData(prev => ({ ...prev, spareParts: n })); }} className="w-24 p-2 border rounded bg-white dark:bg-slate-900" />
+                    <button type="button" onClick={() => { const n = [...formData.spareParts]; n.splice(idx, 1); setFormData(prev => ({ ...prev, spareParts: n })); }} className="text-rose-500 p-1 cursor-pointer"><MinusCircle size={15}/></button>
                   </div>
                 ))}
 
                 <div className="grid grid-cols-2 gap-3 pt-2">
-                  <div className="space-y-1">
-                    <label className="font-semibold text-slate-500 uppercase tracking-wide text-[10px]">İşçilik Ücreti</label>
-                    <input
-                      type="number"
-                      value={formData.laborCost}
-                      onChange={(e) => setFormData(prev => ({ ...prev, laborCost: e.target.value }))}
-                      placeholder="TL"
-                      className="w-full p-2 border border-slate-200 dark:border-slate-800 rounded-lg bg-white dark:bg-slate-900"
-                    />
+                  <div>
+                    <label className="font-semibold text-slate-500 uppercase text-[10px]">İşçilik Ücreti (TL)</label>
+                    <input type="number" min="0" value={formData.laborCost} onChange={(e) => setFormData(prev => ({ ...prev, laborCost: e.target.value }))} placeholder="0" className="w-full p-2 border rounded bg-white dark:bg-slate-900 font-bold" />
                   </div>
-                  <div className="space-y-1">
-                    <label className="font-semibold text-slate-500 uppercase tracking-wide text-[10px]">Ara Toplam Masraf</label>
-                    <div className="w-full p-2 border border-slate-200 dark:border-slate-800 rounded-lg bg-slate-100 dark:bg-slate-950 font-bold text-slate-800 dark:text-white">
-                      {(formData.spareParts.reduce((a,b) => a + (Number(b.price)||0), 0) + (Number(formData.laborCost)||0)) > 0 
-                        ? (formData.spareParts.reduce((a,b) => a + (Number(b.price)||0), 0) + (Number(formData.laborCost)||0)).toLocaleString('tr-TR') + ' TL'
-                        : <span className="text-slate-400 font-normal">veya Manuel Tutar</span>
-                      }
-                    </div>
+                  <div>
+                    <label className="font-semibold text-slate-500 uppercase text-[10px]">Hesaplanan Toplam Tutarı</label>
+                    <div className="p-2 border rounded bg-slate-100 dark:bg-slate-900 font-bold text-teal-600">{calculatedGrandTotal.toLocaleString('tr-TR')} TL</div>
                   </div>
                 </div>
 
-                <div className="space-y-1 border-t border-slate-200 dark:border-slate-800 pt-2 mt-2">
-                  <label className="font-semibold text-slate-500 uppercase tracking-wide text-[10px]">Genel Servis Masrafı (Manuel Girmek İçin)</label>
-                  <input
-                    type="number"
-                    value={formData.cost}
-                    onChange={(e) => setFormData(prev => ({ ...prev, cost: e.target.value }))}
-                    placeholder="Parça/İşçilik girilmezse burası baz alınır"
-                    className="w-full p-2 border border-slate-200 dark:border-slate-800 rounded-lg bg-white dark:bg-slate-900"
-                  />
+                <div className="pt-2 border-t border-slate-200 dark:border-slate-800">
+                  <label className="font-semibold text-slate-500 uppercase text-[10px]">Özel Servis Tutarı (Boş Bırakılırsa Hesaplanan Alınır)</label>
+                  <input type="number" min="0" value={formData.cost} onChange={(e) => setFormData(prev => ({ ...prev, cost: e.target.value }))} placeholder="Boş bırakılırsa hesaplanan toplam alınır" className="w-full p-2 border rounded bg-white dark:bg-slate-900 font-bold" />
                 </div>
               </div>
 
               {/* Status */}
-              <div className="space-y-1">
-                <label className="font-semibold text-slate-500 uppercase tracking-wide">Servis Durumu</label>
-                <select
-                  value={formData.status}
-                  onChange={(e) => setFormData(prev => ({ ...prev, status: e.target.value }))}
-                  className="w-full p-2.5 border border-slate-200 dark:border-slate-800 rounded-xl bg-transparent"
-                >
+              <div>
+                <label className="font-semibold text-slate-500 uppercase">Servis Durumu</label>
+                <select value={formData.status} onChange={(e) => setFormData(prev => ({ ...prev, status: e.target.value }))} className="w-full p-2.5 border rounded-xl bg-transparent font-bold">
                   <option value="Bekliyor">Bekliyor</option>
                   <option value="Tamirde">Tamirde</option>
                   <option value="Hazır">Hazır</option>
@@ -839,40 +637,12 @@ export default function RepairManager({ activePage, globalSearchQuery }) {
                 </select>
               </div>
 
-              {/* Buttons */}
-              <div className="flex justify-between items-center pt-2 border-t border-slate-100 dark:border-slate-800">
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => handlePrintReceipt(formData, true)}
-                    className="px-3 py-2 border border-rose-200 text-rose-600 hover:bg-rose-50 dark:border-rose-900 dark:text-rose-400 dark:hover:bg-rose-950/30 rounded-xl text-[10px] font-bold flex items-center gap-1"
-                    title="Bu form kaydedilmese bile şifreyi ekrana yazdırır. Müşteriye vermeyin."
-                  >
-                    <Printer size={12}/> Teknisyen Çıktısı (Şifreli)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handlePrintReceipt(formData, false)}
-                    className="px-3 py-2 border border-slate-200 hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-800 rounded-xl text-[10px] font-bold flex items-center gap-1"
-                  >
-                    <Printer size={12}/> Müşteri Fişi
-                  </button>
-                </div>
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setShowAddEditModal(false)}
-                    className="px-4 py-2 border border-slate-200 dark:border-slate-850 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl font-semibold cursor-pointer"
-                  >
-                    Vazgeç
-                  </button>
-                  <button
-                    type="submit"
-                    className="px-4 py-2 bg-indigo-650 hover:bg-indigo-700 text-white font-semibold rounded-xl cursor-pointer"
-                  >
-                    Kaydet
-                  </button>
-                </div>
+              {/* Modal Buttons */}
+              <div className="flex justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
+                <button type="button" onClick={() => setShowAddEditModal(false)} className="px-4 py-2 border rounded-xl font-semibold cursor-pointer">Vazgeç</button>
+                <button type="submit" disabled={isSubmitting} className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl cursor-pointer disabled:opacity-50">
+                  {isSubmitting ? 'Kaydediliyor...' : 'Servis Kaydını Kaydet'}
+                </button>
               </div>
 
             </form>
