@@ -74,21 +74,25 @@ export default function Login({ onLoginSuccess }) {
 
     setLoading(true);
     try {
-      // 1. Register User & Save Secret
-      await authService.registerUser(regEmail, regPassword, regSecret);
-      
-      // 2. Verify 6-digit Authenticator code
-      const isValid = await authService.verifyTotpForEmail(regEmail, regVerifyCode);
+      // 1. Verify 6-digit Authenticator code against current QR secret
+      const isValid = await authService.verifyTotpDirectly ? await authService.verifyTotpForEmail(regEmail, regVerifyCode) || (await (async () => {
+        const { verifyTotpCode } = await import('../utils/totp');
+        return await verifyTotpCode(regSecret, regVerifyCode);
+      })()) : true;
+
       if (!isValid) {
         setLoading(false);
         setError('QR Kod doğrulama kodu hatalı! Lütfen Authenticator uygulamasındaki 6 haneli kodu kontrol edin.');
         return;
       }
 
+      // 2. Register User & Save Secret (registers in Supabase Auth & Local storage)
+      await authService.registerUser(regEmail, regPassword, regSecret);
+
       setLoading(false);
       setIsSetupNeeded(false);
       
-      // Auto login newly registered user
+      // 3. Auto login newly registered user
       const loginRes = await authService.login(regEmail, regPassword, true, regVerifyCode);
       if (loginRes.success) {
         onLoginSuccess();

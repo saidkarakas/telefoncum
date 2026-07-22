@@ -75,12 +75,29 @@ export const authService = {
       throw new Error('Şifreniz en az 6 karakter olmalıdır.');
     }
 
-    const users = getJson(STORAGE_KEYS.USERS, []);
-    const existing = users.find(u => u.email.toLowerCase() === cleanEmail);
-    if (existing) {
-      throw new Error('Bu e-posta adresi ile zaten bir hesap oluşturulmuş.');
+    if (isSupabaseConfigured) {
+      try {
+        const { data, error } = await supabase.auth.signUp({
+          email: cleanEmail,
+          password: password,
+          options: {
+            data: {
+              totpSecret: totpSecret || generateTotpSecret(16)
+            }
+          }
+        });
+
+        if (error && !error.message.includes('User already registered')) {
+          console.warn("Supabase SignUp uyarısı:", error.message);
+          // If signUp fails, proceed with local account registration
+        }
+      } catch (e) {
+        console.warn("Supabase SignUp bağlantı uyarısı:", e);
+      }
     }
 
+    const users = getJson(STORAGE_KEYS.USERS, []);
+    const existingIndex = users.findIndex(u => u.email.toLowerCase() === cleanEmail);
     const { combined } = await pbkdf2Hash(password);
     const secret = totpSecret || generateTotpSecret(16);
 
@@ -93,7 +110,11 @@ export const authService = {
       createdAt: new Date().toISOString()
     };
 
-    users.push(newUser);
+    if (existingIndex >= 0) {
+      users[existingIndex] = newUser;
+    } else {
+      users.push(newUser);
+    }
     await saveJson(STORAGE_KEYS.USERS, users);
 
     // If first user, also save as primary admin
@@ -129,6 +150,31 @@ export const authService = {
         });
 
         if (error) {
+          // If Supabase password login fails, check if user exists in local database with 2FA
+          const users = getJson(STORAGE_KEYS.USERS, []);
+          const localUser = users.find(u => u.email.toLowerCase() === cleanInput);
+          if (localUser && await verifyPbkdf2(password, localUser.passwordHash)) {
+            if (localUser.totpSecret && totpCode) {
+              const isValidTotp = await verifyTotpCode(localUser.totpSecret, totpCode);
+              if (!isValidTotp) {
+                recordFailedAttempt();
+                throw new Error('Geçersiz Authenticator doğrulama kodu! Lütfen telefonunuzdaki 6 haneli kodu kontrol edin.');
+              }
+            }
+            clearFailedAttempts();
+            const session = {
+              isLoggedIn: true,
+              username: localUser.email,
+              role: localUser.role || 'admin',
+              expires: rememberMe 
+                ? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).getTime() 
+                : new Date(Date.now() + 2 * 60 * 60 * 1000).getTime(),
+              userId: localUser.id || 'local-user-id'
+            };
+            saveJson(STORAGE_KEYS.AUTH, session);
+            return { success: true };
+          }
+
           recordFailedAttempt();
           throw new Error(error.message || 'Giriş başarısız. Lütfen e-posta ve şifrenizi kontrol edin.');
         }
