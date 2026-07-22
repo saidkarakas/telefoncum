@@ -6,13 +6,15 @@ import {
   RotateCcw, 
   AlertTriangle, 
   CheckCircle,
-  HelpCircle,
   Building,
-  Coins,
-  Lock
+  ShieldCheck,
+  QrCode,
+  Smartphone
 } from 'lucide-react';
+import { QRCodeSVG } from 'qrcode.react';
 import { settingsService } from '../db/services/settingsService';
-import { initDb, SECURITY_LIMITS } from '../db/services/shared';
+import { authService } from '../db/services/authService';
+import { SECURITY_LIMITS } from '../db/services/shared';
 
 export default function SettingsPage({ activePage }) {
   const [settings, setSettings] = useState({
@@ -24,10 +26,14 @@ export default function SettingsPage({ activePage }) {
 
   const [successMsg, setSuccessMsg] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
-
+  const [show2FAQR, setShow2FAQR] = useState(false);
+  const [totpDetails, setTotpDetails] = useState({ secret: '', otpAuthUrl: '', isEnabled: false });
 
   useEffect(() => {
-    const loadSettings = () => setSettings(settingsService.get());
+    const loadSettings = () => {
+      setSettings(settingsService.get());
+      setTotpDetails(authService.getTotpDetails());
+    };
     loadSettings();
     window.addEventListener('tys_db_update', loadSettings);
     return () => window.removeEventListener('tys_db_update', loadSettings);
@@ -73,7 +79,7 @@ export default function SettingsPage({ activePage }) {
     }
   };
 
-  // Import DB Backup JSON (Requirement 6: Async reader.onload + await importDatabase + disable input)
+  // Import DB Backup JSON
   const handleRestore = (e) => {
     setSuccessMsg('');
     setErrorMsg('');
@@ -115,7 +121,7 @@ export default function SettingsPage({ activePage }) {
     reader.readAsText(file);
   };
 
-  // Requirement 5: Reset database via settingsService.resetDatabase()
+  // Reset database
   const handleResetData = async () => {
     if (confirm('DİKKAT: Mevcut tüm telefon, müşteri, cari, tamir ve gider verileriniz silinecektir! Tüm veritabanını sıfırlamak istediğinizden emin misiniz?')) {
       try {
@@ -131,8 +137,6 @@ export default function SettingsPage({ activePage }) {
       }
     }
   };
-
-
 
   return (
     <div className="space-y-6 max-w-2xl mx-auto text-xs">
@@ -160,8 +164,6 @@ export default function SettingsPage({ activePage }) {
         </h3>
 
         <form onSubmit={handleSaveSettings} className="space-y-4">
-          
-          {/* Business Name */}
           <div className="space-y-1">
             <label className="font-semibold text-slate-500 uppercase tracking-wide">İşletme Adı / Logo Yazısı</label>
             <input
@@ -169,18 +171,17 @@ export default function SettingsPage({ activePage }) {
               value={settings.businessName}
               onChange={(e) => setSettings(prev => ({ ...prev, businessName: e.target.value }))}
               placeholder="Telefoncum"
-              className="w-full p-2.5 border border-slate-200 dark:border-slate-800 rounded-xl bg-transparent focus:ring-1 focus:ring-indigo-500 text-xs"
+              className="w-full p-2.5 border border-slate-200 dark:border-slate-800 rounded-xl bg-transparent focus:ring-1 focus:ring-indigo-500 text-xs font-bold"
               required
             />
           </div>
 
-          {/* Currency */}
           <div className="space-y-1">
             <label className="font-semibold text-slate-500 uppercase tracking-wide">Sistem Para Birimi</label>
             <select
               value={settings.currency}
               onChange={(e) => setSettings(prev => ({ ...prev, currency: e.target.value }))}
-              className="w-full p-2.5 border border-slate-200 dark:border-slate-800 rounded-xl bg-transparent text-xs"
+              className="w-full p-2.5 border border-slate-200 dark:border-slate-800 rounded-xl bg-transparent text-xs font-bold"
             >
               <option value="TL">₺ (Türk Lirası)</option>
               <option value="USD">$ (Amerikan Doları)</option>
@@ -197,7 +198,41 @@ export default function SettingsPage({ activePage }) {
         </form>
       </div>
 
-      {/* 2. BACKUP & RESTORE DATABASE TOOL */}
+      {/* 2. 2FA AUTHENTICATOR QR CODE SETTINGS */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm space-y-4">
+        <h3 className="font-bold text-sm uppercase tracking-wider text-slate-850 dark:text-white flex items-center gap-1.5 border-b border-slate-100 dark:border-slate-850 pb-2">
+          <ShieldCheck size={16} className="text-indigo-600" />
+          İki Faktörlü Doğrulama (Google Authenticator 2FA)
+        </h3>
+
+        <p className="text-slate-500 text-[11px] leading-relaxed">
+          Telefonunuzdaki <strong>Google Authenticator</strong>, <strong>Authy</strong> veya <strong>Microsoft Authenticator</strong> uygulamasıyla QR kodu tarayarak sisteme ekstra güvenlik katmanı ekleyebilirsiniz.
+        </p>
+
+        <div className="flex items-center justify-between pt-2">
+          <button
+            onClick={() => setShow2FAQR(!show2FAQR)}
+            className="px-4 py-2 bg-indigo-50 dark:bg-indigo-950/30 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-900 rounded-xl font-bold flex items-center gap-2 cursor-pointer"
+          >
+            <QrCode size={16} />
+            {show2FAQR ? '2FA QR Kodu Gizle' : '2FA QR Kodunu Göster'}
+          </button>
+        </div>
+
+        {show2FAQR && (
+          <div className="p-4 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl flex flex-col items-center gap-3">
+            <QRCodeSVG value={totpDetails.otpAuthUrl} size={180} level="M" includeMargin={true} />
+            <div className="text-center">
+              <div className="text-xs text-slate-500">Authenticator Gizli Anahtarınız:</div>
+              <div className="font-mono font-bold text-sm text-indigo-600 dark:text-indigo-400 select-all tracking-wider">
+                {totpDetails.secret}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* 3. BACKUP & RESTORE DATABASE TOOL */}
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm space-y-4">
         <h3 className="font-bold text-sm uppercase tracking-wider text-slate-850 dark:text-white flex items-center gap-1.5 border-b border-slate-100 dark:border-slate-850 pb-2">
           <Download size={16} className="text-teal-500" />
@@ -207,12 +242,9 @@ export default function SettingsPage({ activePage }) {
         <p className="text-slate-500 text-[11px] leading-relaxed">
           Tüm verileriniz yerel tarayıcı belleğinde (LocalStorage) tutulduğu için tarayıcı temizliğinde kaybolabilir. 
           Güvenliğiniz için belirli aralıklarla sistem yedeğinizi bilgisayarınıza indirmeniz önerilir.
-          <br/><strong className="text-amber-600">Uyarı:</strong> İndirilen JSON yedek dosyası şifreli DEĞİLDİR. Lütfen yedeğinizi güvenli bir ortamda saklayın.
         </p>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
-          
-          {/* Backup Button */}
           <button
             onClick={handleBackup}
             className="flex items-center justify-center gap-2 p-3 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 dark:bg-indigo-950/20 dark:hover:bg-indigo-950/40 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-900/30 rounded-xl font-bold cursor-pointer transition-all"
@@ -221,7 +253,6 @@ export default function SettingsPage({ activePage }) {
             Veritabanını Yedekle (JSON)
           </button>
 
-          {/* Restore Input/Button */}
           <div className="relative">
             <label className="flex items-center justify-center gap-2 p-3 bg-teal-50 hover:bg-teal-100 text-teal-700 dark:bg-teal-950/20 dark:hover:bg-teal-950/40 dark:text-teal-400 border border-teal-200 dark:border-teal-900/30 rounded-xl font-bold cursor-pointer transition-all">
               <Upload size={16} />
@@ -234,11 +265,10 @@ export default function SettingsPage({ activePage }) {
               />
             </label>
           </div>
-
         </div>
       </div>
 
-      {/* 3. DANGER ZONE RESET DATA */}
+      {/* 4. DANGER ZONE RESET DATA */}
       <div className="bg-white dark:bg-slate-900 border border-red-200 dark:border-red-950/40 rounded-2xl p-5 shadow-sm space-y-4">
         <h3 className="font-bold text-sm uppercase tracking-wider text-red-650 flex items-center gap-1.5 border-b border-slate-100 dark:border-slate-850 pb-2">
           <AlertTriangle size={16} className="text-red-500" />
@@ -249,7 +279,7 @@ export default function SettingsPage({ activePage }) {
           <div>
             <div className="font-bold text-slate-800 dark:text-white">Fabrika Ayarlarına Dön</div>
             <p className="text-[10px] text-slate-500 mt-1 max-w-sm leading-relaxed">
-              Mevcut tüm telefon stoklarını, masrafları, giderleri ve cari hesapları sıfırlar. İlk kurulum demo verilerini yeniden yükler.
+              Mevcut tüm telefon stoklarını, masrafları, giderleri ve cari hesapları sıfırlar.
             </p>
           </div>
           <button
@@ -261,7 +291,6 @@ export default function SettingsPage({ activePage }) {
           </button>
         </div>
       </div>
-
 
     </div>
   );

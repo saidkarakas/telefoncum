@@ -1,5 +1,6 @@
 import { supabase, isSupabaseConfigured } from '../supabaseClient';
 import { STORAGE_KEYS, getJson, saveJson, pbkdf2Hash, verifyPbkdf2 } from './shared';
+import { generateTotpSecret, verifyTotpCode, getOtpAuthUrl } from '../../utils/totp';
 
 const LOCK_KEY = 'tys_auth_lock';
 const MAX_ATTEMPTS = 5;
@@ -37,23 +38,45 @@ export const authService = {
     return Boolean(userStr);
   },
 
-  setupInitialLocalAdmin: async (username, password) => {
+  getTotpDetails: () => {
+    const userStr = localStorage.getItem('tys_admin_user');
+    let user = userStr ? JSON.parse(userStr) : null;
+    let secret = user?.totpSecret;
+
+    if (!secret) {
+      secret = generateTotpSecret(16);
+      if (user) {
+        user.totpSecret = secret;
+        localStorage.setItem('tys_admin_user', JSON.stringify(user));
+      }
+    }
+
+    const accountName = user?.username || 'admin';
+    const otpAuthUrl = getOtpAuthUrl(secret, accountName, 'Telefoncum');
+    return { secret, otpAuthUrl, accountName, isEnabled: !!user?.totpEnabled };
+  },
+
+  setupInitialLocalAdmin: async (username, password, totpSecret = null) => {
     const cleanUsername = (username || '').trim();
     if (!cleanUsername || !password || password.length < 6) {
       throw new Error('Yönetici kullanıcı adı ve en az 6 karakterli şifre girmek zorunludur.');
     }
     const { combined } = await pbkdf2Hash(password);
+    const secret = totpSecret || generateTotpSecret(16);
+
     const user = {
       username: cleanUsername,
       passwordHash: combined,
       role: 'admin',
+      totpSecret: secret,
+      totpEnabled: true,
       createdAt: new Date().toISOString()
     };
     localStorage.setItem('tys_admin_user', JSON.stringify(user));
     return user;
   },
 
-  login: async (usernameOrEmail, password, rememberMe) => {
+  login: async (usernameOrEmail, password, rememberMe, totpCode = null) => {
     checkLockout();
 
     const cleanUsername = (usernameOrEmail || '').trim();
@@ -90,7 +113,7 @@ export const authService = {
         throw err;
       }
     } else {
-      // Offline local authentication
+      // Offline local authentication with TOTP 2FA Authenticator check
       const userStr = localStorage.getItem('tys_admin_user');
       if (!userStr) {
         throw new Error('Yönetici hesabı henüz tanımlanmamış. Lütfen ilk kurulumu yapın.');
@@ -103,6 +126,19 @@ export const authService = {
       if (!isMatch) {
         recordFailedAttempt();
         throw new Error('Hatalı kullanıcı adı veya şifre.');
+      }
+
+      // Check TOTP Authenticator code if enabled or configured
+      if (user.totpSecret) {
+        if (!totpCode || totpCode.trim() === '') {
+          return { requires2FA: true, secret: user.totpSecret };
+        }
+
+        const isValidTotp = await verifyTotpCode(user.totpSecret, totpCode);
+        if (!isValidTotp) {
+          recordFailedAttempt();
+          throw new Error('Geçersiz Authenticator doğrulama kodu! Lütfen telefonunuzdaki 6 haneli kodu kontrol edin.');
+        }
       }
 
       clearFailedAttempts();
@@ -118,6 +154,14 @@ export const authService = {
       saveJson(STORAGE_KEYS.AUTH, session);
       return { success: true };
     }
+  },
+
+  verifyTotpDirectly: async (totpCode) => {
+    const userStr = localStorage.getItem('tys_admin_user');
+    if (!userStr) return false;
+    const user = JSON.parse(userStr);
+    if (!user.totpSecret) return false;
+    return await verifyTotpCode(user.totpSecret, totpCode);
   },
 
   // Google OAuth Integration
@@ -141,7 +185,6 @@ export const authService = {
 
       return data;
     } else {
-      // Local Google Authentication simulation for offline testing
       clearFailedAttempts();
       const session = {
         isLoggedIn: true,
