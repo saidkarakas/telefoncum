@@ -1,5 +1,5 @@
 import { supabase, isSupabaseConfigured } from '../supabaseClient';
-import { STORAGE_KEYS, getJson, saveJson, pbkdf2Hash, verifyPbkdf2 } from './shared';
+import { STORAGE_KEYS, getJson, saveJson, pbkdf2Hash, verifyPbkdf2, generateUUID } from './shared';
 import { generateTotpSecret, verifyTotpCode, getOtpAuthUrl } from '../../utils/totp';
 
 const LOCK_KEY = 'tys_auth_lock';
@@ -34,66 +34,103 @@ const clearFailedAttempts = () => {
 
 export const authService = {
   isLocalAdminConfigured: () => {
+    const users = getJson(STORAGE_KEYS.USERS, []);
     const userStr = localStorage.getItem('tys_admin_user');
-    return Boolean(userStr);
+    return users.length > 0 || Boolean(userStr);
   },
 
-  getTotpDetails: () => {
-    const userStr = localStorage.getItem('tys_admin_user');
-    let user = userStr ? JSON.parse(userStr) : null;
-    let secret = user?.totpSecret;
-
-    if (!secret) {
-      secret = generateTotpSecret(16);
-      if (user) {
-        user.totpSecret = secret;
-        localStorage.setItem('tys_admin_user', JSON.stringify(user));
+  getAllUsers: () => {
+    const users = getJson(STORAGE_KEYS.USERS, []);
+    if (users.length === 0) {
+      const adminStr = localStorage.getItem('tys_admin_user');
+      if (adminStr) {
+        try {
+          const adminObj = JSON.parse(adminStr);
+          return [{
+            id: 'legacy-admin',
+            email: adminObj.username,
+            role: 'admin',
+            totpSecret: adminObj.totpSecret,
+            createdAt: adminObj.createdAt || new Date().toISOString()
+          }];
+        } catch (e) {}
       }
     }
-
-    const accountName = user?.username || 'admin';
-    const otpAuthUrl = getOtpAuthUrl(secret, accountName, 'Telefoncum');
-    return { secret, otpAuthUrl, accountName, isEnabled: !!user?.totpEnabled };
+    return users.map(u => ({ id: u.id, email: u.email, role: u.role, createdAt: u.createdAt }));
   },
 
-  setupInitialLocalAdmin: async (username, password, totpSecret = null) => {
-    const cleanUsername = (username || '').trim();
-    if (!cleanUsername || !password || password.length < 6) {
-      throw new Error('Yönetici kullanıcı adı ve en az 6 karakterli şifre girmek zorunludur.');
+  generateUser2FADetails: (email) => {
+    const cleanEmail = (email || 'kullanici').trim().toLowerCase();
+    const secret = generateTotpSecret(16);
+    const otpAuthUrl = getOtpAuthUrl(secret, cleanEmail, 'Telefoncum');
+    return { secret, otpAuthUrl, email: cleanEmail };
+  },
+
+  registerUser: async (email, password, totpSecret = null) => {
+    const cleanEmail = (email || '').trim().toLowerCase();
+    if (!cleanEmail || !cleanEmail.includes('@')) {
+      throw new Error('Geçerli bir e-posta adresi girmelisiniz.');
     }
+    if (!password || password.length < 6) {
+      throw new Error('Şifreniz en az 6 karakter olmalıdır.');
+    }
+
+    const users = getJson(STORAGE_KEYS.USERS, []);
+    const existing = users.find(u => u.email.toLowerCase() === cleanEmail);
+    if (existing) {
+      throw new Error('Bu e-posta adresi ile zaten bir hesap oluşturulmuş.');
+    }
+
     const { combined } = await pbkdf2Hash(password);
     const secret = totpSecret || generateTotpSecret(16);
 
-    const user = {
-      username: cleanUsername,
+    const newUser = {
+      id: generateUUID(),
+      email: cleanEmail,
       passwordHash: combined,
-      role: 'admin',
+      role: users.length === 0 ? 'admin' : 'staff',
       totpSecret: secret,
-      totpEnabled: true,
       createdAt: new Date().toISOString()
     };
-    localStorage.setItem('tys_admin_user', JSON.stringify(user));
-    return user;
+
+    users.push(newUser);
+    await saveJson(STORAGE_KEYS.USERS, users);
+
+    // If first user, also save as primary admin
+    if (users.length === 1) {
+      localStorage.setItem('tys_admin_user', JSON.stringify({
+        username: cleanEmail,
+        passwordHash: combined,
+        totpSecret: secret,
+        role: 'admin'
+      }));
+    }
+
+    return newUser;
   },
 
-  login: async (usernameOrEmail, password, rememberMe, totpCode = null) => {
+  setupInitialLocalAdmin: async (username, password, totpSecret = null) => {
+    return await authService.registerUser(username, password, totpSecret);
+  },
+
+  login: async (emailOrUsername, password, rememberMe, totpCode = null) => {
     checkLockout();
 
-    const cleanUsername = (usernameOrEmail || '').trim();
-    if (!cleanUsername || !password) {
-      throw new Error('Kullanıcı adı/e-posta ve şifre girmek zorunludur.');
+    const cleanInput = (emailOrUsername || '').trim().toLowerCase();
+    if (!cleanInput || !password) {
+      throw new Error('E-posta / kullanıcı adı ve şifre girmek zorunludur.');
     }
 
     if (isSupabaseConfigured) {
       try {
         const { data, error } = await supabase.auth.signInWithPassword({
-          email: cleanUsername,
+          email: cleanInput,
           password: password
         });
 
         if (error) {
           recordFailedAttempt();
-          throw new Error(error.message || 'Giriş başarısız. Lütfen bilgilerinizi kontrol edin.');
+          throw new Error(error.message || 'Giriş başarısız. Lütfen e-posta ve şifrenizi kontrol edin.');
         }
 
         clearFailedAttempts();
@@ -113,22 +150,35 @@ export const authService = {
         throw err;
       }
     } else {
-      // Offline local authentication with TOTP 2FA Authenticator check
-      const userStr = localStorage.getItem('tys_admin_user');
-      if (!userStr) {
-        throw new Error('Yönetici hesabı henüz tanımlanmamış. Lütfen ilk kurulumu yapın.');
+      // Offline multi-user authentication with individual 2FA secrets
+      const users = getJson(STORAGE_KEYS.USERS, []);
+      let user = users.find(u => u.email.toLowerCase() === cleanInput);
+
+      // Fallback for legacy admin
+      if (!user) {
+        const adminStr = localStorage.getItem('tys_admin_user');
+        if (adminStr) {
+          try {
+            const adminObj = JSON.parse(adminStr);
+            if (adminObj.username.toLowerCase() === cleanInput) {
+              user = adminObj;
+            }
+          } catch (e) {}
+        }
       }
 
-      const user = JSON.parse(userStr);
-      const isMatch = (cleanUsername.toLowerCase() === user.username.toLowerCase()) && 
-        await verifyPbkdf2(password, user.passwordHash);
+      if (!user) {
+        recordFailedAttempt();
+        throw new Error('Bu e-posta adresiyle kayıtlı bir hesap bulunamadı.');
+      }
 
+      const isMatch = await verifyPbkdf2(password, user.passwordHash);
       if (!isMatch) {
         recordFailedAttempt();
-        throw new Error('Hatalı kullanıcı adı veya şifre.');
+        throw new Error('Hatalı e-posta veya şifre.');
       }
 
-      // Check TOTP Authenticator code if enabled or configured
+      // Check user's specific 2FA Authenticator code
       if (user.totpSecret) {
         if (!totpCode || totpCode.trim() === '') {
           return { requires2FA: true, secret: user.totpSecret };
@@ -144,22 +194,30 @@ export const authService = {
       clearFailedAttempts();
       const session = {
         isLoggedIn: true,
-        username: user.username,
+        username: user.email || user.username,
         role: user.role || 'admin',
         expires: rememberMe 
           ? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).getTime() 
           : new Date(Date.now() + 2 * 60 * 60 * 1000).getTime(),
-        userId: 'local-admin-id'
+        userId: user.id || 'local-user-id'
       };
       saveJson(STORAGE_KEYS.AUTH, session);
       return { success: true };
     }
   },
 
+  verifyTotpForEmail: async (email, totpCode) => {
+    const cleanEmail = (email || '').trim().toLowerCase();
+    const users = getJson(STORAGE_KEYS.USERS, []);
+    const user = users.find(u => u.email.toLowerCase() === cleanEmail);
+    if (!user || !user.totpSecret) return false;
+    return await verifyTotpCode(user.totpSecret, totpCode);
+  },
+
   verifyTotpDirectly: async (totpCode) => {
-    const userStr = localStorage.getItem('tys_admin_user');
-    if (!userStr) return false;
-    const user = JSON.parse(userStr);
+    const adminStr = localStorage.getItem('tys_admin_user');
+    if (!adminStr) return false;
+    const user = JSON.parse(adminStr);
     if (!user.totpSecret) return false;
     return await verifyTotpCode(user.totpSecret, totpCode);
   },
@@ -188,10 +246,10 @@ export const authService = {
       clearFailedAttempts();
       const session = {
         isLoggedIn: true,
-        username: 'google.admin@gmail.com',
+        username: 'google.user@gmail.com',
         role: 'admin',
         expires: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).getTime(),
-        userId: 'google-local-admin-id',
+        userId: 'google-local-user-id',
         provider: 'google'
       };
       saveJson(STORAGE_KEYS.AUTH, session);

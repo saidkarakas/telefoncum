@@ -15,7 +15,8 @@ export const STORAGE_KEYS = {
   INSTALLMENTS: 'tys_installments',
   TRADE_INS: 'tys_trade_ins',
   CASH_MOVEMENTS: 'tys_cash_movements',
-  PENDING_SYNC: 'tys_pending_sync'
+  PENDING_SYNC: 'tys_pending_sync',
+  USERS: 'tys_users'
 };
 
 export const SECURITY_LIMITS = {
