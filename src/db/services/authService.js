@@ -268,6 +268,7 @@ export const authService = {
     return await verifyTotpCode(user.totpSecret, totpCode);
   },
 
+  /*
   // Google OAuth Integration
   signInWithGoogle: async () => {
     if (isSupabaseConfigured) {
@@ -302,6 +303,7 @@ export const authService = {
       return { success: true };
     }
   },
+  */
 
   changeLocalPassword: async (newPassword) => {
     const userStr = localStorage.getItem('tys_admin_user');

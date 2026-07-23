@@ -131,6 +131,7 @@ export default function Login({ onLoginSuccess }) {
   };
 
   // Handle Google OAuth
+  /*
   const handleGoogleSignIn = async () => {
     setError('');
     setLoading(true);
@@ -145,6 +146,7 @@ export default function Login({ onLoginSuccess }) {
       setError(err.message || 'Google ile giriş yapılamadı.');
     }
   };
+  */
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-100 dark:bg-slate-950 p-4 transition-colors duration-200">
@@ -385,6 +387,7 @@ export default function Login({ onLoginSuccess }) {
               )}
             </button>
 
+            {/*
             <div className="relative flex py-1 items-center">
               <div className="flex-grow border-t border-slate-200 dark:border-slate-800"></div>
               <span className="flex-shrink mx-3 text-slate-400 text-[10px] uppercase tracking-wider">veya</span>
@@ -405,6 +408,7 @@ export default function Login({ onLoginSuccess }) {
               </svg>
               Google ile Giriş Yap
             </button>
+            */}
           </form>
         )}
 
