@@ -195,11 +195,12 @@ export default function Login({ onLoginSuccess }) {
 
         {/* Body */}
         {mode === 'register' ? (
-          /* REGISTRATION FORM WITH UNIQUE QR CODE */
           <form onSubmit={handleRegisterSubmit} className="px-8 pb-8 space-y-3.5 text-xs">
+            {/*
             <div className="p-2.5 bg-indigo-50 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-900 rounded-xl text-indigo-700 dark:text-indigo-300 leading-snug">
               E-postanızı girin. Telefonunuzdaki <strong>Google Authenticator</strong> uygulaması ile bu <strong>e-postanıza özel QR kodu</strong> okutun.
             </div>
+            */}
 
             <div className="space-y-1">
               <label className="font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">
@@ -215,7 +216,7 @@ export default function Login({ onLoginSuccess }) {
               />
             </div>
 
-            {/* Personalized QR Code Container */}
+            {/* Personalized QR Code Container
             <div className="flex flex-col items-center justify-center p-3 bg-white dark:bg-slate-950 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-inner">
               <QRCodeSVG
                 value={regOtpUrl}
@@ -227,6 +228,7 @@ export default function Login({ onLoginSuccess }) {
                 {regEmail || 'kullanici@firma.com'} için 2FA Kodu
               </div>
             </div>
+            */}
 
             {error && (
               <div className="flex items-center gap-2 p-2.5 text-xs rounded-lg bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900 text-red-600 dark:text-red-400 font-semibold">
@@ -264,6 +266,7 @@ export default function Login({ onLoginSuccess }) {
               </div>
             </div>
 
+            {/*
             <div className="space-y-1">
               <label className="font-semibold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider block flex items-center gap-1">
                 <QrCode size={14} /> Google Authenticator 6 Haneli Kod *
@@ -278,6 +281,7 @@ export default function Login({ onLoginSuccess }) {
                 className="w-full px-4 py-2 rounded-xl border-2 border-indigo-500 bg-transparent text-slate-900 dark:text-white font-mono font-bold text-center tracking-widest text-lg"
               />
             </div>
+            */}
 
             <button
               type="submit"
@@ -346,7 +350,7 @@ export default function Login({ onLoginSuccess }) {
               </div>
             </div>
 
-            {/* 2FA Authenticator Code Input */}
+            {/* 2FA Authenticator Code Input 
             <div className="space-y-1 p-2.5 bg-indigo-500/5 rounded-xl border border-indigo-500/20">
               <label className="text-xs font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider block flex items-center gap-1.5">
                 <Smartphone size={16} /> Google Authenticator 6 Haneli Kod
@@ -360,6 +364,7 @@ export default function Login({ onLoginSuccess }) {
                 className="w-full px-4 py-2 rounded-xl border border-indigo-300 dark:border-indigo-800 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-mono font-bold text-center tracking-widest text-lg"
               />
             </div>
+            */}
 
             {/* Remember Me */}
             <div className="flex items-center justify-between pt-1">

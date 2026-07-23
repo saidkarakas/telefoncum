@@ -26,13 +26,10 @@ export default function SettingsPage({ activePage }) {
 
   const [successMsg, setSuccessMsg] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
-  const [show2FAQR, setShow2FAQR] = useState(false);
-  const [totpDetails, setTotpDetails] = useState({ secret: '', otpAuthUrl: '', isEnabled: false });
 
   useEffect(() => {
     const loadSettings = () => {
       setSettings(settingsService.get());
-      setTotpDetails(authService.getTotpDetails());
     };
     loadSettings();
     window.addEventListener('tys_db_update', loadSettings);
@@ -196,40 +193,6 @@ export default function SettingsPage({ activePage }) {
             Ayarları Kaydet
           </button>
         </form>
-      </div>
-
-      {/* 2. 2FA AUTHENTICATOR QR CODE SETTINGS */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm space-y-4">
-        <h3 className="font-bold text-sm uppercase tracking-wider text-slate-850 dark:text-white flex items-center gap-1.5 border-b border-slate-100 dark:border-slate-850 pb-2">
-          <ShieldCheck size={16} className="text-indigo-600" />
-          İki Faktörlü Doğrulama (Google Authenticator 2FA)
-        </h3>
-
-        <p className="text-slate-500 text-[11px] leading-relaxed">
-          Telefonunuzdaki <strong>Google Authenticator</strong>, <strong>Authy</strong> veya <strong>Microsoft Authenticator</strong> uygulamasıyla QR kodu tarayarak sisteme ekstra güvenlik katmanı ekleyebilirsiniz.
-        </p>
-
-        <div className="flex items-center justify-between pt-2">
-          <button
-            onClick={() => setShow2FAQR(!show2FAQR)}
-            className="px-4 py-2 bg-indigo-50 dark:bg-indigo-950/30 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-900 rounded-xl font-bold flex items-center gap-2 cursor-pointer"
-          >
-            <QrCode size={16} />
-            {show2FAQR ? '2FA QR Kodu Gizle' : '2FA QR Kodunu Göster'}
-          </button>
-        </div>
-
-        {show2FAQR && (
-          <div className="p-4 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl flex flex-col items-center gap-3">
-            <QRCodeSVG value={totpDetails.otpAuthUrl} size={180} level="M" includeMargin={true} />
-            <div className="text-center">
-              <div className="text-xs text-slate-500">Authenticator Gizli Anahtarınız:</div>
-              <div className="font-mono font-bold text-sm text-indigo-600 dark:text-indigo-400 select-all tracking-wider">
-                {totpDetails.secret}
-              </div>
-            </div>
-          </div>
-        )}
       </div>
 
       {/* 3. BACKUP & RESTORE DATABASE TOOL */}

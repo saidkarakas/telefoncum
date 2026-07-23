@@ -154,6 +154,7 @@ export const authService = {
           const users = getJson(STORAGE_KEYS.USERS, []);
           const localUser = users.find(u => u.email.toLowerCase() === cleanInput);
           if (localUser && await verifyPbkdf2(password, localUser.passwordHash)) {
+            /*
             if (localUser.totpSecret && totpCode) {
               const isValidTotp = await verifyTotpCode(localUser.totpSecret, totpCode);
               if (!isValidTotp) {
@@ -161,6 +162,7 @@ export const authService = {
                 throw new Error('Geçersiz Authenticator doğrulama kodu! Lütfen telefonunuzdaki 6 haneli kodu kontrol edin.');
               }
             }
+            */
             clearFailedAttempts();
             const session = {
               isLoggedIn: true,
@@ -225,6 +227,7 @@ export const authService = {
       }
 
       // Check user's specific 2FA Authenticator code
+      /*
       if (user.totpSecret) {
         if (!totpCode || totpCode.trim() === '') {
           return { requires2FA: true, secret: user.totpSecret };
@@ -236,6 +239,7 @@ export const authService = {
           throw new Error('Geçersiz Authenticator doğrulama kodu! Lütfen telefonunuzdaki 6 haneli kodu kontrol edin.');
         }
       }
+      */
 
       clearFailedAttempts();
       const session = {
