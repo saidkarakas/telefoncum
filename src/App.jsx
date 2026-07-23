@@ -104,19 +104,34 @@ export default function App() {
           data.forEach(row => {
             if (row.key === STORAGE_KEYS.AUTH || row.key === STORAGE_KEYS.PENDING_SYNC) return;
 
-            const localVal = getJson(row.key, []);
+            const localValStr = localStorage.getItem(row.key);
+            let localVal = null;
+            try {
+              localVal = localValStr ? JSON.parse(localValStr) : null;
+            } catch (e) {}
+
             const remoteVal = row.value;
 
-            if (Array.isArray(localVal) && Array.isArray(remoteVal)) {
-              // Requirement 10: Safe Merge by ID and updatedAt (latest wins)
-              const merged = mergeCollections(localVal, remoteVal);
+            // Handle Settings (Object) vs Data Collections (Array)
+            if (row.key === STORAGE_KEYS.SETTINGS) {
+              const mergedSettings = { ...(localVal || {}), ...(remoteVal || {}) };
+              const mergedStr = JSON.stringify(mergedSettings);
+              if (localValStr !== mergedStr) {
+                localStorage.setItem(row.key, mergedStr);
+                updated = true;
+              }
+            } else if (Array.isArray(localVal) || Array.isArray(remoteVal)) {
+              // Safe Merge for Arrays (Collections)
+              const safeLocal = Array.isArray(localVal) ? localVal : [];
+              const safeRemote = Array.isArray(remoteVal) ? remoteVal : [];
+              const merged = mergeCollections(safeLocal, safeRemote);
               const mergedStr = JSON.stringify(merged);
-              if (JSON.stringify(localVal) !== mergedStr) {
+              if (localValStr !== mergedStr) {
                 localStorage.setItem(row.key, mergedStr);
                 updated = true;
               }
             } else {
-              const localValStr = localStorage.getItem(row.key);
+              // Fallback for simple values
               const remoteValStr = JSON.stringify(remoteVal);
               if (localValStr !== remoteValStr) {
                 localStorage.setItem(row.key, remoteValStr);
