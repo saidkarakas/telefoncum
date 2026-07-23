@@ -32,6 +32,15 @@ export default function App() {
     initDb();
     
     const checkAuth = async () => {
+      try {
+        if (!authService.isLocalAdminConfigured()) {
+          console.log("Test için varsayılan kullanıcı oluşturuluyor: test@test.com / 123456");
+          await authService.setupInitialLocalAdmin('test@test.com', '123456');
+        }
+      } catch (e) {
+        console.error("Test kullanıcısı oluşturulurken hata:", e);
+      }
+
       if (isSupabaseConfigured) {
         const { data: { session } } = await supabase.auth.getSession();
         setIsLoggedIn(!!session);
